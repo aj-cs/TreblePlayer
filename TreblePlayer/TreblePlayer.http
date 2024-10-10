@@ -1,0 +1,6 @@
+@TreblePlayer_HostAddress = http://localhost:5155
+
+GET {{TreblePlayer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

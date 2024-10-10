@@ -1,0 +1,9 @@
+namespace TreblePlayer.Data;
+using Microsoft.EntityFrameworkCore;
+using TreblePlayer.Models;
+public class AppDbContext : DbContext
+{
+    public DbSet<Track> Track { get; set; }
+    public DbSet<ListeningData> ListeningData { get; set; }
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+}
