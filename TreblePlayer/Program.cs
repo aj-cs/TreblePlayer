@@ -12,6 +12,8 @@ builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
+//needed for react ->
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp", builder =>
@@ -21,7 +23,7 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddDbContext<MusicPlayerDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
-
+builder.Services.AddScoped<MusicPlayer>();
 
 var app = builder.Build();
 
@@ -32,8 +34,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-
+//Needed for react ->
 app.UseCors("AllowReactApp");
+
+//might not need this ->
 app.UseHttpsRedirection();
 
 app.UseAuthorization();

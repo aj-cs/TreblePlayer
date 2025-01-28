@@ -11,9 +11,11 @@ public class Album : ITrackCollection
     public string AlbumArtist { get; set; }
     public string Genre { get; set; }
     public string FolderPath { get; set; }
+    public int? Year { get; set; }
     public DateTime DateCreated { get; set; }
     public DateTime LastModified { get; set; }
     public TrackCollectionType CollectionType => TrackCollectionType.Album;
+    //TODO: change Tracks to private
     public ICollection<Track> Tracks { get; set; } = new List<Track>();
 
     public void AddTrack(Track track)
@@ -37,9 +39,5 @@ public class Album : ITrackCollection
             Tracks.Remove(track);
             LastModified = DateTime.Now;
         }
-    }
-    public IEnumerable<Track> GetTracks()
-    {
-        return Tracks;
     }
 }

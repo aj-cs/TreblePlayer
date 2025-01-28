@@ -15,6 +15,17 @@ public class TrackQueue : ITrackCollection
     public TrackCollectionType CollectionType => TrackCollectionType.TrackQueue;
     public ICollection<Track> Tracks { get; set; } = new List<Track>();
 
+    public static TrackQueue CreateFromCollection(ITrackCollection collection)
+    {
+        return new TrackQueue
+        {
+            Title = collection.Title,
+            Tracks = collection.Tracks,
+            DateCreated = DateTime.UtcNow,
+            LastModified = DateTime.UtcNow,
+        };
+    }
+
     public void AddTrack(Track track)
     {
         if (track == null)
@@ -22,7 +33,7 @@ public class TrackQueue : ITrackCollection
             throw new ArgumentNullException(nameof(track), "Track cannot be null");
         }
         Tracks.Add(track);
-        LastModified = DateTime.Now;
+        LastModified = DateTime.UtcNow;
     }
 
     public void RemoveTrack(Track track)
@@ -36,10 +47,5 @@ public class TrackQueue : ITrackCollection
             Tracks.Remove(track);
             LastModified = DateTime.Now;
         }
-    }
-
-    public IEnumerable<Track> GetTracks()
-    {
-        return Tracks;
     }
 }

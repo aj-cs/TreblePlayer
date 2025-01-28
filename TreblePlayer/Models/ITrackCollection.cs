@@ -12,6 +12,7 @@ public interface ITrackCollection
     public DateTime DateCreated { get; set; }
     public DateTime LastModified { get; set; }
 
+    //TODO: change Tracks to private
     public ICollection<Track> Tracks { get; set; }
 
     public TrackCollectionType CollectionType { get; }
@@ -19,6 +20,5 @@ public interface ITrackCollection
     public void RemoveTrack(Track track);
     //public void RenameCollection(string title);
     //public void DeleteCollection();
-    public IEnumerable<Track> GetTracks();
 
 }

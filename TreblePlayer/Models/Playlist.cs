@@ -1,7 +1,9 @@
+using System.ComponentModel.DataAnnotations;
 namespace TreblePlayer.Models;
 
 public class Playlist : ITrackCollection
 {
+    [Key]
     public int Id { get; set; } //playlist Id, change to hashcode later
     public string Title { get; set; }
 
@@ -10,7 +12,7 @@ public class Playlist : ITrackCollection
     public DateTime DateCreated { get; set; }
     public DateTime LastModified { get; set; }
     public TrackCollectionType CollectionType => TrackCollectionType.Playlist;
-    public ICollection<Track> Tracks { get; set; }
+    public ICollection<Track> Tracks { get; set; } = new List<Track>();
 
     public void AddTrack(Track track)
     {
@@ -33,11 +35,6 @@ public class Playlist : ITrackCollection
             Tracks.Remove(track);
             LastModified = DateTime.Now;
         }
-    }
-
-    public IEnumerable<Track> GetTracks()
-    {
-        return Tracks;
     }
 
 }

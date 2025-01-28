@@ -8,19 +8,21 @@ using Microsoft.AspNetCore.SignalR;
 
 public class MusicPlayer
 {
-    private readonly MusicPlayerDbContext _dbContext;
+    private readonly ITrackRepository _trackRepository;
+    private readonly ITrackCollectionRepository _collectionRepository;
     private readonly IHubContext<PlaybackHub> _hubContext;
     private LibVLC _libVlc; // maybe readonly
     private MediaPlayer _mediaPlayer;
     private TaskCompletionSource<bool>? _tcs;
 
     //Tracking current collection
-    private ITrackCollection _currentCollection;
+    private ITrackCollection? _currentCollection;
     private int _currentTrackIndex;
 
-    public MusicPlayer(MusicPlayerDbContext dbContext, IHubContext<PlaybackHub> hubContext)
+    public MusicPlayer(ITrackRepository trackRepository, ITrackCollectionRepository collectionRepository, IHubContext<PlaybackHub> hubContext)
     {
-        _dbContext = dbContext;
+        _trackRepository = trackRepository;
+        _collectionRepository = collectionRepository;
         _hubContext = hubContext;
         Core.Initialize();
         _libVlc = new LibVLC();
@@ -46,7 +48,7 @@ public class MusicPlayer
         {
             _tcs.TrySetResult(false); // or maybe _tcs.TrySetCanceled() idk
         }
-        var track = await _dbContext.Tracks.FindAsync(trackId);
+        var track = await _trackRepository.GetTrackByIdAsync(trackId);
         if (track == null)
         {
             throw new Exception("Track not found");
@@ -118,37 +120,60 @@ public class MusicPlayer
         return _mediaPlayer.IsPlaying;
     }
 
-    public async Task CreateQueueAsync(string title)
+    public async Task CreateQueueFromAlbumOrPlaylistAsync(int collectionId, TrackCollectionType type)
     {
         //change later, 
         // queues should be created from track(s) aka IEnumerable/ICollection<Track> or an ITrackCollection
         //temporary queue logic, final musicplayer.cs
+        ITrackCollection collection = type switch
+        {
+            TrackCollectionType.Album =>
+                collection = await _collectionRepository.GetTrackCollectionByIdAsync(collectionId, TrackCollectionType.Album) as Album,
 
-        if (string.IsNullOrWhiteSpace(title))
-        {
-            throw new Exception("Queue title cannot be null or empty.");
-        }
-        var newQueue = new TrackQueue
-        {
-            Title = title,
-            DateCreated = DateTime.UtcNow,
-            LastModified = DateTime.UtcNow,
+            TrackCollectionType.Playlist =>
+                collection = await _collectionRepository.GetTrackCollectionByIdAsync(collectionId, TrackCollectionType.Album) as Playlist,
+
+            _ => throw new ArgumentException("Cannot create new queue out of existing queue.")
+
         };
-        await _dbContext.TrackQueues.AddAsync(newQueue);
-        await _dbContext.SaveChangesAsync();
+
+        if (collection == null)
+        {
+            throw new Exception("Invalid collection type or collection not found.");
+        }
+        //if (string.IsNullOrWhiteSpace(title))
+        //{
+        //    throw new Exception("Queue title cannot be null or empty.");
+        //}
+
+        TrackQueue newQueue = TrackQueue.CreateFromCollection(collection);
+        await _collectionRepository.AddQueueAsync(newQueue);
+    }
+
+    public async Task CreateQueueFromTracksAsync(int[] trackIds)
+    {
+        List<Track> tracks = new List<Track>();
+        if (trackIds.Count() == 1)
+        {
+            await _trackRepository.GetTrackByIdAsync(trackIds[0]);
+        }
+        else
+        {
+            tracks.AddRange(await _trackRepository.GetTracksByIdAsync(trackIds));
+        }
     }
 
     public async Task AddTrackToQueueAsync(int queueId, int trackId)
     {
-        var queue = await _dbContext.TrackQueues.FindAsync(queueId);
-        var track = await _dbContext.Tracks.FindAsync(trackId);
+        var queue = await _collectionRepository.GetTrackCollectionByIdAsync(queueId, TrackCollectionType.TrackQueue) as TrackQueue;
+        var track = await _trackRepository.GetTrackByIdAsync(trackId);
 
         if (queue == null || track == null)
         {
             throw new Exception("Queue or Track not found.");
         }
         queue.AddTrack(track);
-        await _dbContext.SaveChangesAsync();
+        await _collectionRepository.SaveAsync(queue);
     }
     public async Task PlayCollectionAsync(ITrackCollection collection, int startIndex = 0)
     {
@@ -189,11 +214,8 @@ public class MusicPlayer
          * deleting tracks, maybe in the future deleting the album gives an option
          * to send to a "void" 'album', where there is no album metadata
          */
-        var album =
-            await _dbContext
-            .Albums
-            .Include(a => a.Tracks)
-            .FirstOrDefaultAsync(a => a.Id == albumId);
+        var album = await _collectionRepository.GetTrackCollectionByIdAsync(albumId, TrackCollectionType.Album) as Album;
+
         if (album == null)
         {
             throw new Exception($"Album with id {albumId} not found.");
@@ -206,9 +228,7 @@ public class MusicPlayer
             }
         }
 
-        _dbContext.Tracks.RemoveRange(album.Tracks);
-        _dbContext.Albums.Remove(album);
-        await _dbContext.SaveChangesAsync();
+        await _collectionRepository.RemoveAlbumAndTracksAsync(album);
         //issues if the file is in use or lacks permissions
     }
 
@@ -222,8 +242,8 @@ public class MusicPlayer
                 break;
             case TrackCollectionType.Playlist:
             case TrackCollectionType.TrackQueue:
-                _dbContext.Remove(collection);
-                await _dbContext.SaveChangesAsync();
+                _collectionRepository.RemoveCollectionFromDb(collection);
+                await _collectionRepository.SaveChangesAsync();
                 break;
             default:
                 throw new ArgumentException("Unsupported track collection type.");
@@ -259,13 +279,12 @@ public class MusicPlayer
     {
         Console.WriteLine("Track paused.");
         _hubContext.Clients.All.SendAsync("PlaybackPaused");
-        _tcs.TrySetResult(true);
+        //_tcs.TrySetResult(true);
     }
 
     private void Playing(object sender, EventArgs e)
     {
         Console.WriteLine("Track playing.");
         _hubContext.Clients.All.SendAsync("PlaybackPlaying");
-        //_tcs.TrySetResult(true); ????
     }
 }

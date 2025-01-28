@@ -4,9 +4,10 @@ using Microsoft.EntityFrameworkCore;
 public class MusicPlayerDbContext : DbContext
 {
     public MusicPlayerDbContext(DbContextOptions<MusicPlayerDbContext> options) : base(options) { }
-    public DbSet<Album> Albums { get; set; }
+
     public DbSet<Track> Tracks { get; set; }
-    //public DbSet<Playlist> Playlists { get; set; }
+    public DbSet<Album> Albums { get; set; }
+    public DbSet<Playlist> Playlists { get; set; }
     public DbSet<TrackQueue> TrackQueues { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -22,22 +23,43 @@ public class MusicPlayerDbContext : DbContext
            .HasOne(t => t.Album)
            .WithMany(a => a.Tracks)
            .HasForeignKey(t => t.AlbumId);
-        /*
-        Playlist-Track relationship
+
+        //Playlist-Track relationship
         modelBuilder.Entity<Playlist>()
            .HasKey(p => p.Id);
 
         modelBuilder.Entity<Playlist>()
            .HasMany(p => p.Tracks)
-           .WithMany(); // Many-to-many: A playlist can have many tracks, and tracks can belong to multiple playlists
+           .WithMany(t => t.Playlists)  // track can be in multiple playlists
+           .UsingEntity<Dictionary<string, object>>(
+                 "PlaylistTrack",
+                 j => j.HasOne<Track>()
+                 .WithMany()
+                 .HasForeignKey("TrackId"),
 
-        Queue-Track relationship
-        /*modelBuilder.Entity<TrackQueue>()
+                 j => j.HasOne<Playlist>()
+                 .WithMany()
+                 .HasForeignKey("PlaylistId")
+                 );
+        // many to many,  playlist can have many tracks, and tracks can belong to multiple playlists
+
+        //Queue-Track relationship
+        modelBuilder.Entity<TrackQueue>()
            .HasKey(q => q.Id);
 
+        // one to many 
         modelBuilder.Entity<TrackQueue>()
-           .HasOne(q => q.Track)
-           .WithMany(); // Each queue entry refers to one track
-           */
+           .HasMany(q => q.Tracks)
+           .WithMany(t => t.TrackQueues)
+           .UsingEntity<Dictionary<string, object>>(
+                 "TrackQueueTrack",
+                 j => j.HasOne<Track>()
+                 .WithMany()
+                 .HasForeignKey("TrackId"),
+
+                 j => j.HasOne<TrackQueue>()
+                 .WithMany()
+                 .HasForeignKey("TrackQueueId")
+                 );
     }
 }
