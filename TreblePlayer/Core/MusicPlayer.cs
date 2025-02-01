@@ -175,8 +175,15 @@ public class MusicPlayer
         queue.AddTrack(track);
         await _collectionRepository.SaveAsync(queue);
     }
-    public async Task PlayCollectionAsync(ITrackCollection collection, int startIndex = 0)
+    public async Task PlayCollectionAsync(int collectionId, TrackCollectionType type, int startIndex = 0)
     {
+        ITrackCollection collection = type switch
+        {
+            TrackCollectionType.Album => await _collectionRepository.GetAlbumByIdAsync(collectionId),
+            TrackCollectionType.Playlist => await _collectionRepository.GetPlaylistByIdAsync(collectionId),
+            TrackCollectionType.TrackQueue => await _collectionRepository.GetQueueByIdAsync(collectionId),
+            _ => throw new ArgumentException("Unsupported collection type")
+        };
         if (collection == null || collection.Tracks.Count == 0)
         {
             Console.WriteLine("No tracks in the collection to play.");
