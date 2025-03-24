@@ -4,6 +4,8 @@ using System.Security.Cryptography.Xml;
 using TreblePlayer.Core;
 using TreblePlayer.Data;
 using TreblePlayer.Models;
+using Microsoft.AspNetCore.SignalR;
+using System.Collections.Concurrent;
 namespace TreblePlayer.Controllers;
 
 
@@ -17,50 +19,97 @@ public class MusicController : ControllerBase
     {
         _player = musicPlayer;
     }
-    
-    [HttpPost("play/{trackId}")]
-    public async Task<IActionResult> PlayMusic(int trackId)
-    {
-        try {
 
+    [HttpPost("play/{trackId}")]
+    public async Task<IActionResult> PlayAsync(int trackId)
+    {
+        try
+        {
             await _player.PlayAsync(trackId);
             return Ok(new { message = $"Playing track (ID: {trackId})" });
         }
-        catch (Exception e) {
-            return StatusCode(500, new { message = e.Message });
+        catch (Exception e)
+        {
+            Console.WriteLine(e); // Log full exception to console
+            return StatusCode(500, new { message = "An unexpected error occurred." });
+        }
+    }
+    [HttpPost("resume")]
+    public IActionResult Resume()
+    {
+        try
+        {
+            _player.Resume();
+            return Ok(new { message = "Playback resumed" });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+            return StatusCode(500, new { message = ex.Message });
         }
     }
 
 
     [HttpPost("pause")]
-    public async Task<IActionResult> Pause()
-    
+    public IActionResult Pause()
     {
-        try {
-
-            await _player.PauseAsync();
+        try
+        {
+            _player.Pause();
             return Ok(new { message = "Paused music." });
         }
-        catch (Exception e) {
-            return StatusCode(500, new { message = "Error pausing music." });
+        catch (Exception e)
+        {
+            Console.WriteLine(e); // Log full exception to console
+            return StatusCode(500, new { message = "An unexpected error occurred." });
         }
     }
-    
-    [HttpPost("stop")]
-    public async Task<IActionResult> Stop()
-    {
-        try {
 
-            await _player.StopAsync();
+    [HttpPost("stop")]
+    public IActionResult Stop()
+    {
+        try
+        {
+            _player.Stop();
             return Ok(new { message = "Stopped music." });
         }
-        catch (Exception e) {
-            return StatusCode(500, new { message = "Error stopping music." });
+        catch (Exception e)
+        {
+            Console.WriteLine(e); // Log full exception to console
+            return StatusCode(500, new { message = "An unexpected error occurred." });
+        }
+    }
+    [HttpPost("seek/{seconds}")]
+    public IActionResult Seek(float seconds)
+    {
+        try
+        {
+            _player.Seek(seconds);
+            return Ok(new { message = $"Seeked to {seconds} seconds." });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+            return StatusCode(500, new { message = "Failed to seek." });
+        }
+    }
+    [HttpPost("playCollection/{collectionId}/{type}")]
+    public async Task<IActionResult> PlayCollection(int collectionId, TrackCollectionType type)
+    {
+        try
+        {
+            await _player.PlayCollectionAsync(collectionId, type);
+            return Ok(new { message = $"Playing collection {collectionId} of type {type}" });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+            return StatusCode(500, new { message = $"Failed to play collection {collectionId} of type {type}" });
         }
     }
 
     [HttpGet("status")]
-    public IActionResult GetMusicPlayerStatus()
+    public IActionResult GetStatus()
     {
         var isPlaying = _player.IsPlaying();
         return Ok(new { message = $"Music playing: {isPlaying}" });
@@ -70,26 +119,31 @@ public class MusicController : ControllerBase
     public async Task<IActionResult> CreateQueue(string title) //change later, 
     // queues should be created from track(s) aka IEnumerable/ICollection<Track> or an ITrackCollection
     {
-        
-        try {
+        try
+        {
             await _player.CreateQueueAsync(title);
             return Ok(new { message = $"Queue {title} created." });
         }
+
         catch (Exception e)
         {
-            return StatusCode(500, new { message = e.Message });
+            Console.WriteLine(e); // Log full exception to console
+            return StatusCode(500, new { message = "An unexpected error occurred." });
         }
 
     }
     [HttpPost("queue/{queueId}/addTrack/{trackId}")]
     public async Task<IActionResult> AddTrackToQueue(int queueId, int trackId)
     {
-        try {
+        try
+        {
             await _player.AddTrackToQueueAsync(queueId, trackId);
             return Ok(new { message = $"Track (ID: {trackId} added to Queue (ID: {queueId})" });
         }
-        catch (Exception e) {
-            return StatusCode(500, new { message = e.Message });
+        catch (Exception e)
+        {
+            Console.WriteLine(e); // Log full exception to console
+            return StatusCode(500, new { message = "An unexpected error occurred." });
         }
     }
 

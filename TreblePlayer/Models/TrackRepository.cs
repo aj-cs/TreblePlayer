@@ -1,5 +1,9 @@
 using TreblePlayer.Data;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 namespace TreblePlayer.Models;
 
 public class TrackRepository : ITrackRepository
@@ -20,7 +24,7 @@ public class TrackRepository : ITrackRepository
 
     public async Task<Track> GetTrackByIdAsync(int trackId)
     {
-        return await _dbContext.Tracks.FindAsync(trackId);
+        return await _dbContext.Tracks.FirstOrDefaultAsync(t => t.TrackId == trackId);
     }
 
     public async Task RemoveTracksFromDb(ICollection<Track> tracks)

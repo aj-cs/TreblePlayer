@@ -21,9 +21,12 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         return collectionType switch
         {
 
-            TrackCollectionType.Album => await _dbContext.Albums.Include(a => a.Tracks).FirstOrDefaultAsync(a => a.Id == collectionId),
-            TrackCollectionType.Playlist => await _dbContext.Playlists.Include(p => p.Tracks).FirstOrDefaultAsync(p => p.Id == collectionId),
-            TrackCollectionType.TrackQueue => await _dbContext.TrackQueues.Include(q => q.Tracks).FirstOrDefaultAsync(q => q.Id == collectionId),
+            TrackCollectionType.Album => await _dbContext.Albums.Include(a => a.Tracks)
+                .FirstOrDefaultAsync(a => a.Id == collectionId),
+            TrackCollectionType.Playlist => await _dbContext.Playlists.Include(p => p.Tracks)
+                .FirstOrDefaultAsync(p => p.Id == collectionId),
+            TrackCollectionType.TrackQueue => await _dbContext.TrackQueues.Include(q => q.Tracks)
+                .FirstOrDefaultAsync(q => q.Id == collectionId),
             _ => throw new ArgumentException("Unsupported track collection type.")
         };
     }
@@ -35,7 +38,13 @@ public class TrackCollectionRepository : ITrackCollectionRepository
     }
     public async Task SaveAsync(ITrackCollection collection)
     {
-        _dbContext.Update(collection);
+        var existingCollection = await GetTrackCollectionByIdAsync(collection.Id, collection.CollectionType);
+        if (existingCollection == null)
+        {
+            throw new ArgumentException("Collection not found.");
+        }
+
+        _dbContext.Entry(existingCollection).CurrentValues.SetValues(collection);
         await _dbContext.SaveChangesAsync();
     }
 
@@ -51,17 +60,23 @@ public class TrackCollectionRepository : ITrackCollectionRepository
 
     public async Task<List<ITrackCollection>> GetCollectionsByTitleAsync(string title)
     {
-        var albums = await _dbContext.Albums.Where(a => a.Title.Contains(title)).ToListAsync<ITrackCollection>();
-        var playlists = await _dbContext.Playlists.Where(a => a.Title.Contains(title)).ToListAsync<ITrackCollection>();
-        var queues = await _dbContext.TrackQueues.Where(a => a.Title.Contains(title)).ToListAsync<ITrackCollection>();
-        return albums.Concat(playlists).Concat(queues).ToList();
+        var albums = await _dbContext.Albums.Where(a => a.Title.Contains(title)).ToListAsync();
+        var playlists = await _dbContext.Playlists.Where(a => a.Title.Contains(title)).ToListAsync();
+        var queues = await _dbContext.TrackQueues.Where(a => a.Title.Contains(title)).ToListAsync();
+        return albums.Cast<ITrackCollection>()
+            .Concat(playlists.Cast<ITrackCollection>())
+            .Concat(queues.Cast<ITrackCollection>())
+            .ToList();
     }
     public async Task<List<ITrackCollection>> GetCollectionsByTrackAsync(int trackId)
     {
-        var albums = await _dbContext.Albums.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync<ITrackCollection>();
-        var playlists = await _dbContext.Playlists.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync<ITrackCollection>();
-        var queues = await _dbContext.TrackQueues.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync<ITrackCollection>();
-        return albums.Concat(playlists).Concat(queues).ToList();
+        var albums = await _dbContext.Albums.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync();
+        var playlists = await _dbContext.Playlists.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync();
+        var queues = await _dbContext.TrackQueues.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync();
+        return albums.Cast<ITrackCollection>()
+            .Concat(playlists.Cast<ITrackCollection>())
+            .Concat(queues.Cast<ITrackCollection>())
+            .ToList();
     }
 
     public async Task<Album> GetAlbumByIdAsync(int albumId)
@@ -80,19 +95,22 @@ public class TrackCollectionRepository : ITrackCollectionRepository
     }
     public async Task RemoveCollectionFromDb(ITrackCollection collection)
     {
-        switch (collection.CollectionType)
+        if (collection is Album album)
         {
-            case TrackCollectionType.Album:
-                _dbContext.Albums.Remove((Album)collection);
-                break;
-            case TrackCollectionType.Playlist:
-                _dbContext.Playlists.Remove((Playlist)collection);
-                break;
-            case TrackCollectionType.TrackQueue:
-                _dbContext.TrackQueues.Remove((TrackQueue)collection);
-                break;
-            default:
-                throw new ArgumentException("Unsupported Track Collection");
+            _dbContext.Albums.Remove(album);
+        }
+        else if (collection is Playlist playlist)
+        {
+            _dbContext.Playlists.Remove(playlist);
+        }
+
+        else if (collection is TrackQueue queue)
+        {
+            _dbContext.TrackQueues.Remove(queue);
+        }
+        else
+        {
+            throw new ArgumentException("Unsupported Track Collection");
         }
         await _dbContext.SaveChangesAsync();
     }
@@ -100,21 +118,24 @@ public class TrackCollectionRepository : ITrackCollectionRepository
     public async Task RemoveAlbumAndTracksAsync(Album album)
     {
         // remove the tracks
-        _dbContext.Tracks.RemoveRange(album.Tracks);
+        if (album == null)
+        {
+            throw new ArgumentException("Album not found.");
+        }
 
-        // remove the album 
+        if (!_dbContext.Albums.Contains(album))
+        {
+            Console.WriteLine("Album does not exist in DB");
+            return;
+        }
+
         _dbContext.Albums.Remove(album);
-
-        await SaveChangesAsync();
+        await _dbContext.SaveChangesAsync();
     }
 
     public async Task UpdateCollectionAsync(ITrackCollection collection)
     {
         _dbContext.Update(collection);
-        await _dbContext.SaveChangesAsync();
-    }
-    public async Task SaveChangesAsync()
-    {
         await _dbContext.SaveChangesAsync();
     }
 }

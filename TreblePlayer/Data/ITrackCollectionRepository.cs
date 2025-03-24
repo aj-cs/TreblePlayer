@@ -20,6 +20,6 @@ public interface ITrackCollectionRepository
 
     Task UpdateCollectionAsync(ITrackCollection collection);
 
-    Task SaveChangesAsync();
+    // Task SaveChangesAsync();
 }
 

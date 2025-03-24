@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.AspNetCore.SignalR;
 using TreblePlayer.Data;
 using TreblePlayer.Core;
+using TreblePlayer.Services;
+using TreblePlayer.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,10 +25,23 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddDbContext<MusicPlayerDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddScoped<ITrackRepository, TrackRepository>();
+builder.Services.AddScoped<ITrackCollectionRepository, TrackCollectionRepository>();
+// builder.Services.AddScoped<IFolderService, FolderService>();
+
+builder.Services.AddScoped<IMetadataService, MetadataService>();
+builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<MusicPlayer>();
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
+    string folderPath = Path.Combine(Directory.GetCurrentDirectory(), "music");
+    await metadataService.ScanMusicFolderAsync(folderPath);
+}
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
