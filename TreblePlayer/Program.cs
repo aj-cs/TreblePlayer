@@ -32,7 +32,11 @@ builder.Services.AddScoped<ITrackCollectionRepository, TrackCollectionRepository
 
 builder.Services.AddScoped<IMetadataService, MetadataService>();
 builder.Services.AddScoped<IFileService, FileService>();
-builder.Services.AddScoped<MusicPlayer>();
+builder.Services.AddSingleton<MusicPlayer>(sp =>
+{
+    var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+    return new MusicPlayer(scopeFactory, sp.GetRequiredService<IHubContext<PlaybackHub>>());
+});
 
 var app = builder.Build();
 

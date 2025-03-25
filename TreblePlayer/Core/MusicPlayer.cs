@@ -15,9 +15,10 @@ using SoundFlow.Enums;
 
 public class MusicPlayer : IDisposable
 {
-    private readonly ITrackRepository _trackRepository;
-    private readonly ITrackCollectionRepository _collectionRepository;
+    // private readonly ITrackRepository _trackRepository;
+    // private readonly ITrackCollectionRepository _collectionRepository;
     private ITrackCollection? _currentCollection;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHubContext<PlaybackHub> _hubContext;
 
     private CancellationTokenSource? _cts;
@@ -31,13 +32,10 @@ public class MusicPlayer : IDisposable
     //Tracking current collection
     private int _currentTrackIndex;
 
-    public MusicPlayer(ITrackRepository trackRepository,
-            ITrackCollectionRepository collectionRepository,
-            IHubContext<PlaybackHub> hubContext)
+    public MusicPlayer(IServiceScopeFactory scopeFactory, IHubContext<PlaybackHub> hubContext)
     {
         _engine = new MiniAudioEngine(44100, Capability.Playback);
-        _trackRepository = trackRepository;
-        _collectionRepository = collectionRepository;
+        _scopeFactory = scopeFactory;
         _hubContext = hubContext;
 
         _currentCollection = null;
@@ -47,7 +45,9 @@ public class MusicPlayer : IDisposable
 
     public async Task PlayAsync(int trackId)
     {
-        var track = await _trackRepository.GetTrackByIdAsync(trackId);
+        using var scope = _scopeFactory.CreateScope();
+        var trackRepo = scope.ServiceProvider.GetRequiredService<ITrackRepository>();
+        var track = await trackRepo.GetTrackByIdAsync(trackId);
         if (track == null)
         {
             throw new Exception("Track not found");
@@ -163,7 +163,9 @@ public class MusicPlayer : IDisposable
 
     public async Task PlayCollectionAsync(int collectionId, TrackCollectionType type, int startIndex = 0)
     {
-        var collection = await _collectionRepository.GetTrackCollectionByIdAsync(collectionId, type);
+        using var scope = _scopeFactory.CreateScope();
+        var collectionRepo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
+        var collection = await collectionRepo.GetTrackCollectionByIdAsync(collectionId, type);
         if (collection == null || collection.Tracks.Count == 0)
         {
             Console.WriteLine("No tracks in the collection to play.");
@@ -192,13 +194,20 @@ public class MusicPlayer : IDisposable
     {
         var newQueue = new TrackQueue { Title = title };
 
-        await _collectionRepository.AddQueueAsync(newQueue);
+        using var scope = _scopeFactory.CreateScope();
+        var collectionRepo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
+        await collectionRepo.AddQueueAsync(newQueue);
     }
 
     public async Task AddTrackToQueueAsync(int queueId, int trackId)
     {
-        var track = await _trackRepository.GetTrackByIdAsync(trackId);
-        var queue = await _collectionRepository.GetQueueByIdAsync(queueId);
+        using var scope = _scopeFactory.CreateScope();
+        var collectionRepo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
+        var trackRepo = scope.ServiceProvider.GetRequiredService<ITrackRepository>();
+
+
+        var track = await trackRepo.GetTrackByIdAsync(trackId);
+        var queue = await collectionRepo.GetQueueByIdAsync(queueId);
 
 
         if (track == null || queue == null)
@@ -207,7 +216,7 @@ public class MusicPlayer : IDisposable
         }
 
         queue.AddTrack(track);
-        await _collectionRepository.SaveAsync(queue);
+        await collectionRepo.SaveAsync(queue);
 
     }
     public void Dispose()
