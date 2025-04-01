@@ -61,5 +61,9 @@ public class MusicPlayerDbContext : DbContext
                  .WithMany()
                  .HasForeignKey("TrackQueueId")
                  );
+        modelBuilder.Entity<TrackQueue>()
+           .Property(q => q.ShuffledTrackIds)
+           .HasColumnType("TEXT");
+        base.OnModelCreating(modelBuilder); //idk if this is necessary
     }
 }

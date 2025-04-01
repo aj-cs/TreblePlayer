@@ -79,6 +79,36 @@ public class MusicController : ControllerBase
             return StatusCode(500, new { message = "An unexpected error occurred." });
         }
     }
+    [HttpPost("next")]
+    public async Task<IActionResult> PlayNext()
+    {
+        try
+        {
+            await _player.NextAsync();
+            return Ok(new { message = "Next track playing." });
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            return StatusCode(500, new { message = "An error occured." });
+        }
+
+    }
+
+    [HttpPost("previous")]
+    public async Task<IActionResult> PlayPrevious()
+    {
+        try
+        {
+            await _player.PreviousAsync();
+            return Ok(new { message = "Previous track playing." });
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            return StatusCode(500, new { message = "An error occured." });
+        }
+    }
     [HttpPost("seek/{seconds}")]
     public IActionResult Seek(float seconds)
     {
@@ -144,6 +174,49 @@ public class MusicController : ControllerBase
         {
             Console.WriteLine(e); // Log full exception to console
             return StatusCode(500, new { message = "An unexpected error occurred." });
+        }
+    }
+    [HttpPost("shuffle/{enable}")]
+    public IActionResult EnableShuffle(bool enable)
+    {
+        _player.EnableShuffle(enable);
+        return Ok(new { message = $"Shuffle {(enable ? "enabled" : "disabled")}" });
+    }
+
+    [HttpPost("loop/{enable}")]
+    public IActionResult EnableLoop(bool enable)
+    {
+        _player.EnableLoop(enable);
+        return Ok(new { message = $"Loop {(enable ? "enabled" : "disabled")}" });
+    }
+
+    [HttpPost("loop/set/{mode}")]
+    public async Task<IActionResult> SetLoopMode(int mode)
+    {
+        try
+        {
+            await _player.SetLoopModeAsync((LoopTrack)mode);
+            return Ok(new { message = $"Loop mode set to {mode}" });
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            return StatusCode(500, new { message = "Failed to set loop mode." });
+        }
+    }
+
+    [HttpPost("loop/toggle")]
+    public async Task<IActionResult> ToggleLoopMode()
+    {
+        try
+        {
+            var newMode = await _player.ToggleLoopModeAsync();
+            return Ok(new { message = $"Loop mode toggled to {newMode}" });
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            return StatusCode(500, new { message = "Failed to toggle loop mode." });
         }
     }
 

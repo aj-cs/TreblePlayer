@@ -1,11 +1,10 @@
-using TreblePlayer.Data;
+using TreblePlayer.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-namespace TreblePlayer.Models;
-
+namespace TreblePlayer.Data;
 
 public class TrackCollectionRepository : ITrackCollectionRepository
 {
@@ -31,11 +30,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         };
     }
 
-    public async Task AddQueueAsync(TrackQueue queue)
-    {
-        await _dbContext.TrackQueues.AddAsync(queue);
-        await _dbContext.SaveChangesAsync();
-    }
+
     public async Task SaveAsync(ITrackCollection collection)
     {
         var existingCollection = await GetTrackCollectionByIdAsync(collection.Id, collection.CollectionType);
@@ -81,18 +76,18 @@ public class TrackCollectionRepository : ITrackCollectionRepository
 
     public async Task<Album> GetAlbumByIdAsync(int albumId)
     {
-        return await _dbContext.Albums.Include(a => a.Tracks).FirstOrDefaultAsync(a => a.Id == albumId);
+        return await _dbContext.Albums
+            .Include(a => a.Tracks)
+            .FirstOrDefaultAsync(a => a.Id == albumId);
     }
 
     public async Task<Playlist> GetPlaylistByIdAsync(int playlistId)
     {
-        return await _dbContext.Playlists.Include(a => a.Tracks).FirstOrDefaultAsync(a => a.Id == playlistId);
+        return await _dbContext.Playlists
+            .Include(a => a.Tracks)
+            .FirstOrDefaultAsync(a => a.Id == playlistId);
     }
 
-    public async Task<TrackQueue> GetQueueByIdAsync(int queueId)
-    {
-        return await _dbContext.TrackQueues.Include(a => a.Tracks).FirstOrDefaultAsync(a => a.Id == queueId);
-    }
     public async Task RemoveCollectionFromDb(ITrackCollection collection)
     {
         if (collection is Album album)
@@ -136,6 +131,58 @@ public class TrackCollectionRepository : ITrackCollectionRepository
     public async Task UpdateCollectionAsync(ITrackCollection collection)
     {
         _dbContext.Update(collection);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task<TrackQueue> GetQueueByIdAsync(int queueId)
+    {
+        return await _dbContext.TrackQueues
+            .Include(q => q.Tracks)
+            .FirstOrDefaultAsync(q => q.Id == queueId);
+    }
+    // could make async and have var queuse = await dbcontext... then reutrn queues but we arent doing anything after so
+    public Task<List<TrackQueue>> GetAllQueuesAsync()
+    {
+        return _dbContext.TrackQueues
+            .Include(q => q.Tracks)
+            .ToListAsync();
+    }
+    public async Task AddQueueAsync(TrackQueue queue)
+    {
+        await _dbContext.TrackQueues.AddAsync(queue);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task RemoveTrackFromQueueAsync(int queueId, int trackId)
+    {
+        var queue = await _dbContext.TrackQueues
+            .Include(q => q.Tracks)
+            .FirstOrDefaultAsync(q => q.Id == queueId);
+        if (queue == null)
+        {
+            throw new Exception($"Queue {queueId} not found");
+        }
+
+        var track = queue.Tracks.FirstOrDefault(t => t.TrackId == trackId);
+        if (track == null)
+        {
+            throw new Exception($"Track {track} not found");
+        }
+
+        queue.Tracks.Remove(track);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task ClearQueueAsync(int queueId)
+    {
+        var queue = await _dbContext.TrackQueues
+            .Include(q => q.Tracks)
+            .FirstOrDefaultAsync(q => q.Id == queueId);
+        if (queue == null)
+        {
+            throw new Exception($"Queue: {queueId} not found.");
+        }
+        queue.Tracks.Clear();
         await _dbContext.SaveChangesAsync();
     }
 }

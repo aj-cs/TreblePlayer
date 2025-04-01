@@ -67,56 +67,75 @@ public class MetadataService : IMetadataService
             .Where(file => SupportedExtensions.Contains(Path.GetExtension(file).ToLower()))
             .ToList();
 
+
         foreach (var filePath in filePaths)
         {
+            if (await _dbContext.Tracks.AnyAsync(t => t.FilePath == filePath))
+            {
+                continue;
+            }
             try
             {
-
-                var trackMetadata = new ATL.Track(filePath); // ATL.NET reads metadata
-                var newTrack = new TreblePlayer.Models.Track
+                var metadata = new ATL.Track(filePath);
+                var newTrack = new Models.Track
                 {
-                    Title = trackMetadata.Title ?? Path.GetFileNameWithoutExtension(filePath),
-                    Artist = trackMetadata.Artist ?? "Unknown Artist",
-                    AlbumTitle = trackMetadata.Album ?? "Unknown Album",
-                    DateCreated = System.DateTime.UtcNow,
-                    LastModified = System.DateTime.UtcNow,
-                    FilePath = filePath ?? "Unknown File",
-                    Duration = trackMetadata.Duration,
+                    Title = metadata.Title ?? Path.GetFileNameWithoutExtension(filePath),
+                    Artist = metadata.Artist ?? "Unknown Artist",
+                    AlbumTitle = metadata.Album ?? "Unknown Album",
+                    Bitrate = metadata.Bitrate,
+                    Year = metadata.Year ?? null,
+                    Genre = metadata.Genre ?? "Unknown Genre",
+                    DateCreated = DateTime.UtcNow,
+                    LastModified = DateTime.UtcNow,
+                    FilePath = filePath,
+                    Duration = metadata.Duration,
                 };
-
-                // Check if album exists, otherwise create a new one
-                var album = await _dbContext.Albums.FirstOrDefaultAsync(a => a.Title == newTrack.AlbumTitle);
-                if (album == null)
-                {
-                    album = new Album
-                    {
-                        Title = newTrack.AlbumTitle ?? "Unknown Album",
-                        AlbumArtist = newTrack.Artist ?? "Unknown Artist",
-                        Genre = "Unknown Genre",
-                        FolderPath = Path.GetDirectoryName(filePath) ?? "Unknown Folder",
-                        Year = newTrack.Year ?? 0,
-                        DateCreated = DateTime.UtcNow,
-                        LastModified = DateTime.UtcNow,
-                        Tracks = new List<TreblePlayer.Models.Track>()
-                    };
-                    _dbContext.Albums.Add(album);
-                }
-
-                if (string.IsNullOrWhiteSpace(album.FolderPath))
-                {
-                    album.FolderPath = Path.GetDirectoryName(filePath) ?? "Unknown Folder";
-                }
-
-                if (!album.Tracks.Any(t => t.TrackId == newTrack.TrackId))
-                    album.Tracks.Add(newTrack);
+                var album = await GetOrCreateAlbumAsync(newTrack, filePath);
+                album.Tracks.Add(newTrack);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error processing file '{filePath}': {ex.Message}");
+                Console.WriteLine($"Error processing '{filePath}': {ex.Message}");
             }
         }
 
         await _dbContext.SaveChangesAsync();
         Console.WriteLine("Music folder scan complete.");
+    }
+
+    public async Task<Album> GetOrCreateAlbumAsync(Models.Track track, string filePath)
+    {
+        try
+        {
+            var folder = Path.GetDirectoryName(filePath);
+            var album = await _dbContext.Albums
+                .Include(a => a.Tracks)
+                .FirstOrDefaultAsync(a =>
+                        a.Title == track.AlbumTitle &&
+                        a.AlbumArtist == track.Artist &&
+                        a.FolderPath == folder);
+
+            if (album != null)
+            {
+                return album;
+            }
+            album = new Album
+            {
+                Title = track.AlbumTitle ?? "Unknown Album",
+                AlbumArtist = track.Artist ?? "Unknown Artist",
+                Genre = track.Genre ?? "Unknown Genre",
+                FolderPath = folder,
+                Year = track.Year ?? null,
+                DateCreated = DateTime.UtcNow,
+                LastModified = DateTime.UtcNow,
+            };
+            _dbContext.Albums.Add(album);
+            return album;
+        }
+        catch (FileNotFoundException)
+        {
+            Console.WriteLine($"No file found at {filePath}");
+            throw;
+        }
     }
 }
