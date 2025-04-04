@@ -11,6 +11,7 @@ using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Components;
 using SoundFlow.Providers;
 using SoundFlow.Enums;
+using TreblePlayer.Services;
 
 namespace TreblePlayer.Core;
 
@@ -18,6 +19,7 @@ public class MusicPlayer : IDisposable
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHubContext<PlaybackHub> _hubContext;
+    private readonly ILoggingService _logger;
     private CancellationTokenSource? _cts;
 
     private readonly MiniAudioEngine _engine;
@@ -30,12 +32,12 @@ public class MusicPlayer : IDisposable
     public bool ShuffleEnabled = false;
     public bool AutoAdvanceEnabled { get; set; } = true;
 
-    public MusicPlayer(IServiceScopeFactory scopeFactory, IHubContext<PlaybackHub> hubContext)
+    public MusicPlayer(IServiceScopeFactory scopeFactory, IHubContext<PlaybackHub> hubContext, ILoggingService logger)
     {
         _engine = new MiniAudioEngine(44100, Capability.Playback);
         _scopeFactory = scopeFactory;
         _hubContext = hubContext;
-
+        _logger = logger;
     }
 
     /// <summary>
@@ -60,12 +62,12 @@ public class MusicPlayer : IDisposable
                 {
                     if (_player.State == PlaybackState.Playing)
                     {
-                        Console.WriteLine("MusicPlayer: Already playing the current track.");
+                        _logger.LogInformation("MusicPlayer: Already playing the current track.");
                         return;
                     }
                     else if (_player.State == PlaybackState.Paused)
                     {
-                        Console.WriteLine("MusicPlayer: Resuming paused track.");
+                        _logger.LogInformation("MusicPlayer: Resuming paused track.");
                         _player.Play();
                         _isPlaying = true;
                         _hubContext.Clients.All.SendAsync("PlaybackResume");
@@ -74,7 +76,7 @@ public class MusicPlayer : IDisposable
                 }
                 else
                 {
-                    Console.WriteLine("MusicPlayer: Overriding current track with new track.");
+                    _logger.LogInformation("MusicPlayer: Overriding current track with new track.");
                 }
             }
             // Stop any existing playback before starting new playback.
@@ -88,7 +90,7 @@ public class MusicPlayer : IDisposable
         {
             provider.EndOfStreamReached += async (sender, args) =>
             {
-                Console.WriteLine("End of track reached. Auto advancing.");
+                _logger.LogInformation("End of track reached. Auto advancing.");
                 await NextAsync();
             };
         }
@@ -105,11 +107,11 @@ public class MusicPlayer : IDisposable
         if (seekSeconds.HasValue)
         {
             _player.Seek(seekSeconds.Value);
-            Console.WriteLine($"Resumed at {seekSeconds.Value} seconds");
+            _logger.LogInformation($"Resumed at {seekSeconds.Value} seconds");
         }
 
         await _hubContext.Clients.All.SendAsync("PlaybackStarted", track.TrackId);
-        Console.WriteLine($"Playing: {track.Title}, ID: {track.TrackId}");
+        _logger.LogInformation($"Playing: {track.Title}, ID: {track.TrackId}");
 
         // NOTE: The background monitoring loop has been removed.
         // If you need to auto-advance to the next track when one finishes,
@@ -139,13 +141,13 @@ public class MusicPlayer : IDisposable
         var collection = await collectionRepo.GetTrackCollectionByIdAsync(collectionId, type);
         if (collection == null || collection.Tracks.Count == 0)
         {
-            Console.WriteLine("No tracks in the collection to play.");
+            _logger.LogWarning("No tracks in the collection to play.");
             return;
         }
 
         if (startIndex < 0 || startIndex >= collection.Tracks.Count)
         {
-            Console.WriteLine("Invalid start index.");
+            _logger.LogWarning("Invalid start index.");
             return;
         }
         //skip to the start index
@@ -170,14 +172,14 @@ public class MusicPlayer : IDisposable
         {
             if (_player == null || _player.State != PlaybackState.Playing)
             {
-                Console.WriteLine("MusicPlayer: Cannot pause, no track is playing");
+                _logger.LogWarning("MusicPlayer: Cannot pause, no track is playing");
                 return false;
             }
             _player?.Pause();
             _isPlaying = false;
             _ = SaveActiveQueueStateAsync(); // persist s the paused pos
             _hubContext.Clients.All.SendAsync("PlaybackPaused");
-            Console.WriteLine("Paused");
+            _logger.LogInformation("Paused");
             return true;
         }
     }
@@ -191,7 +193,7 @@ public class MusicPlayer : IDisposable
         {
             if (_player == null)
             {
-                Console.WriteLine("MusicPlayer: No active track to stop");
+                _logger.LogWarning("MusicPlayer: No active track to stop");
                 return false;
             }
             _cts?.Cancel();
@@ -203,7 +205,7 @@ public class MusicPlayer : IDisposable
             }
             catch (InvalidOperationException ex)
             {
-                Console.WriteLine($"Warning: _player.Stop() failed - {ex.Message}");
+                _logger.LogWarning($"Warning: _player.Stop() failed - {ex.Message}");
             }
             _isPlaying = false;
 
@@ -215,7 +217,7 @@ public class MusicPlayer : IDisposable
             }
 
             _hubContext.Clients.All.SendAsync("PlaybackStopped");
-            Console.WriteLine("Stopped");
+            _logger.LogInformation("Stopped");
             return true;
         }
     }
@@ -229,14 +231,14 @@ public class MusicPlayer : IDisposable
         {
             if (_player == null || _player.State != PlaybackState.Paused)
             {
-                Console.WriteLine("MusicPlayer: Cannot resume, no track is paused.");
+                _logger.LogWarning("MusicPlayer: Cannot resume, no track is paused.");
                 return false;
             }
 
             _player.Play();
             _isPlaying = true;
             _hubContext.Clients.All.SendAsync("PlaybackResume");
-            Console.WriteLine("Resumed");
+            _logger.LogInformation("Resumed");
             return true;
         }
     }
@@ -247,7 +249,7 @@ public class MusicPlayer : IDisposable
         {
             _player?.Seek(seconds);
             _hubContext.Clients.All.SendAsync("PlaybackSeeked", seconds);
-            Console.WriteLine($"Seeked to {seconds} seconds");
+            _logger.LogInformation($"Seeked to {seconds} seconds");
         }
     }
 
@@ -356,7 +358,7 @@ public class MusicPlayer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to remove track from queue: {ex.Message}");
+            _logger.LogError($"Failed to remove track from queue: {ex.Message}");
         }
     }
 
@@ -379,7 +381,7 @@ public class MusicPlayer : IDisposable
         }
         _iterator = new TrackIterator(queue.Tracks.ToList());
         _iterator.Shuffle();
-        Console.WriteLine($"Shuffled queue {queueId}");
+        _logger.LogInformation($"Shuffled queue {queueId}");
 
     }
 
@@ -396,7 +398,7 @@ public class MusicPlayer : IDisposable
         var queue = await collectionRepo.GetQueueByIdAsync(queueId);
         if (queue == null || queue.Tracks.Count == 0)
         {
-            Console.WriteLine("Queue not found or is empty");
+            _logger.LogWarning("Queue not found or is empty");
             return;
         }
 
@@ -479,7 +481,7 @@ public class MusicPlayer : IDisposable
     public void EnableShuffle(bool enable = true)
     {
         ShuffleEnabled = enable;
-        Console.WriteLine($"Shuffle mode: {(ShuffleEnabled ? "Enabled" : "Disabled")}");
+        _logger.LogInformation($"Shuffle mode: {(ShuffleEnabled ? "Enabled" : "Disabled")}");
         _ = Task.Run(async () =>
         {
             using var scope = _scopeFactory.CreateScope();
@@ -505,6 +507,7 @@ public class MusicPlayer : IDisposable
 
     public void EnableLoop(bool enable = true)
     {
+        _logger.LogInformation($"Loop mode: {(enable ? "Enabled" : "Disabled")}");
         _ = Task.Run(async () =>
         {
             using var scope = _scopeFactory.CreateScope();
@@ -515,7 +518,6 @@ public class MusicPlayer : IDisposable
             {
                 queue.IsLoopEnabled = enable;
                 await repo.SaveAsync(queue);
-                Console.WriteLine($"Loop mode: {(enable ? "Enabled" : "Disabled")}");
             }
         });
     }
@@ -547,7 +549,7 @@ public class MusicPlayer : IDisposable
                 LoopTrack.Forever => LoopTrack.None,
                 _ => LoopTrack.None
             };
-            Console.WriteLine($"Loop mode set to: {queue.LoopTrack}");
+            _logger.LogInformation($"Loop mode set to: {queue.LoopTrack}");
             await repo.SaveAsync(queue);
             return queue.LoopTrack;
         }
@@ -557,9 +559,6 @@ public class MusicPlayer : IDisposable
     {
         Stop();
         _engine.Dispose();
-        if (_engine.IsDisposed)
-        {
-            Console.WriteLine("Disposed engine");
-        }
+        _logger.LogInformation("Disposed engine");
     }
 }

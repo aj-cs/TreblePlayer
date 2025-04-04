@@ -5,10 +5,18 @@ using TreblePlayer.Data;
 using TreblePlayer.Core;
 using TreblePlayer.Services;
 using TreblePlayer.Models;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+builder.Services.AddLogging(logging =>
+{
+    logging.ClearProviders();
+    logging.AddConsole();
+    logging.AddDebug();
+    logging.SetMinimumLevel(LogLevel.Information);
+});
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -32,6 +40,7 @@ builder.Services.AddScoped<ITrackCollectionRepository, TrackCollectionRepository
 
 builder.Services.AddScoped<IMetadataService, MetadataService>();
 builder.Services.AddScoped<IFileService, FileService>();
+builder.Services.AddScoped<ILoggingService, LoggingService>();
 builder.Services.AddSingleton<MusicPlayer>(sp =>
 {
     var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();

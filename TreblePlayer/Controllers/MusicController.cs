@@ -6,6 +6,7 @@ using TreblePlayer.Data;
 using TreblePlayer.Models;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
+using TreblePlayer.Services;
 namespace TreblePlayer.Controllers;
 
 
@@ -15,9 +16,20 @@ public class MusicController : ControllerBase
 {
     //private readonly AppDbContext _appDbContext;
     private readonly MusicPlayer _player;
-    public MusicController(MusicPlayer musicPlayer)
+    private readonly ITrackRepository _trackRepository;
+    private readonly ITrackCollectionRepository _collectionRepository;
+    private readonly ILoggingService _logger;
+
+    public MusicController(
+        MusicPlayer musicPlayer,
+        ITrackRepository trackRepository,
+        ITrackCollectionRepository collectionRepository,
+        ILoggingService logger)
     {
         _player = musicPlayer;
+        _trackRepository = trackRepository;
+        _collectionRepository = collectionRepository;
+        _logger = logger;
     }
 
     [HttpPost("play/{trackId}")]
@@ -30,7 +42,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception e)
         {
-            Console.WriteLine(e); // Log full exception to console
+            _logger.LogError($"Error playing track {trackId}", e);
             return StatusCode(500, new { message = "An unexpected error occurred." });
         }
     }
@@ -51,7 +63,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex);
+            _logger.LogError("Error resuming playback", ex);
             return StatusCode(500, new { message = ex.Message });
         }
     }
@@ -74,7 +86,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception e)
         {
-            Console.WriteLine(e); // Log full exception to console
+            _logger.LogError("Error pausing playback", e);
             return StatusCode(500, new { message = "An unexpected error occurred." });
         }
     }
@@ -94,9 +106,9 @@ public class MusicController : ControllerBase
                 return BadRequest(new { message = "No playing track to stop." });
             }
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            Console.WriteLine(e); // Log full exception to console
+            _logger.LogError("Error stopping playback", ex);
             return StatusCode(500, new { message = "An unexpected error occurred." });
         }
     }
@@ -110,7 +122,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            _logger.LogError("Error skipping to next track", e);
             return StatusCode(500, new { message = "An error occured." });
         }
 
@@ -126,7 +138,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            _logger.LogError("Error skipping to previous track", e);
             return StatusCode(500, new { message = "An error occured." });
         }
     }
@@ -140,7 +152,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex);
+            _logger.LogError($"Error seeking to {seconds} seconds", ex);
             return StatusCode(500, new { message = "Failed to seek." });
         }
     }
@@ -154,7 +166,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex);
+            _logger.LogError($"Error playing collection {collectionId}", ex);
             return StatusCode(500, new { message = $"Failed to play collection {collectionId} of type {type}" });
         }
     }
@@ -178,7 +190,7 @@ public class MusicController : ControllerBase
 
         catch (Exception e)
         {
-            Console.WriteLine(e); // Log full exception to console
+            _logger.LogError("Error creating queue", e);
             return StatusCode(500, new { message = "An unexpected error occurred." });
         }
 
@@ -193,7 +205,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception e)
         {
-            Console.WriteLine(e); // Log full exception to console
+            _logger.LogError("Error adding track to queue", e);
             return StatusCode(500, new { message = "An unexpected error occurred." });
         }
     }
@@ -221,7 +233,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            _logger.LogError("Error setting loop mode", e);
             return StatusCode(500, new { message = "Failed to set loop mode." });
         }
     }
@@ -236,7 +248,7 @@ public class MusicController : ControllerBase
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            _logger.LogError("Error toggling loop mode", e);
             return StatusCode(500, new { message = "Failed to toggle loop mode." });
         }
     }
