@@ -263,7 +263,7 @@ public class MusicPlayer : IDisposable
     {
         if (_iterator?.HasNext == true)
         { //NOTE: check if ? is fine here
-            await InternalPlayAsync(_iterator.Next());
+            await InternalPlayAsync(_iterator.Next);
         }
         else
         {
@@ -283,7 +283,7 @@ public class MusicPlayer : IDisposable
     {
         if (_iterator?.HasPrevious == true)
         {
-            await InternalPlayAsync(_iterator.Previous());
+            await InternalPlayAsync(_iterator.Previous);
         }
     }
 
@@ -379,7 +379,7 @@ public class MusicPlayer : IDisposable
         {
             throw new ArgumentException($"Queue: {queueId} not found or is empty.");
         }
-        _iterator = new TrackIterator(queue.Tracks.ToList());
+        _iterator = new TrackIterator(queue.Tracks.ToList(), 0, _logger);
         _iterator.Shuffle();
         _logger.LogInformation($"Shuffled queue {queueId}");
 
@@ -404,11 +404,12 @@ public class MusicPlayer : IDisposable
 
         var orderedTracks = queue.GetShuffledOrder()
             .Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id))
-            .Where(t => t != null)!
+            .Where(t => t != null)
+            .Select(t => t!)  // Tell compiler this is non-null
             .ToList();
 
         int effectiveIndex = startIndex != 0 ? startIndex : (queue.CurrentTrackIndex ?? 0);
-        _iterator = new TrackIterator(orderedTracks, effectiveIndex);
+        _iterator = new TrackIterator(orderedTracks, effectiveIndex, _logger);
         queue.IsSessionQueue = true;
         queue.CurrentTrackIndex = startIndex;
         await collectionRepo.SaveAsync(queue);

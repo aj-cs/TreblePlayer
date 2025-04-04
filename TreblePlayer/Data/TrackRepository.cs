@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using TreblePlayer.Services;
+using TreblePlayer.Models;
 
 namespace TreblePlayer.Data;
 
@@ -17,18 +18,17 @@ public class TrackRepository : ITrackRepository
         _dbContext = dbContext;
         _logger = logger;
     }
-
     public async Task<IEnumerable<Track>> GetTracksByIdAsync(IEnumerable<int> trackIds)
     {
         var tracks = await _dbContext.Tracks
             .Where(t => trackIds.Contains(t.TrackId))
             .ToListAsync();
-        
+
         if (!tracks.Any())
         {
             _logger.LogWarning($"No tracks found for IDs: {string.Join(", ", trackIds)}");
         }
-        
+
         return tracks;
     }
 
@@ -106,12 +106,12 @@ public class TrackRepository : ITrackRepository
         var tracks = await _dbContext.Tracks
             .Where(t => t.AlbumId == albumId)
             .ToListAsync();
-            
+
         if (!tracks.Any())
         {
             _logger.LogWarning($"No tracks found for album ID: {albumId}");
         }
-        
+
         return tracks;
     }
 
@@ -121,12 +121,12 @@ public class TrackRepository : ITrackRepository
             .Where(t => t.Id == playlistId)
             .SelectMany(p => p.Tracks)
             .ToListAsync();
-            
+
         if (!tracks.Any())
         {
             _logger.LogWarning($"No tracks found for playlist ID: {playlistId}");
         }
-        
+
         return tracks;
     }
-} 
+}

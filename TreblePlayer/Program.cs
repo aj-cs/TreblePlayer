@@ -44,7 +44,9 @@ builder.Services.AddScoped<ILoggingService, LoggingService>();
 builder.Services.AddSingleton<MusicPlayer>(sp =>
 {
     var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-    return new MusicPlayer(scopeFactory, sp.GetRequiredService<IHubContext<PlaybackHub>>());
+    var hubContext = sp.GetRequiredService<IHubContext<PlaybackHub>>();
+    var logger = sp.GetRequiredService<ILoggingService>();
+    return new MusicPlayer(scopeFactory, hubContext, logger);
 });
 
 var app = builder.Build();
@@ -72,4 +74,19 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<PlaybackHub>("/treblehub");
+
+if (args.Length > 0)
+{
+    if (args[0] == "clear-db")
+    {
+        using var scope = app.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<MusicPlayerDbContext>();
+        dbContext.Tracks.RemoveRange(dbContext.Tracks);
+        dbContext.Albums.RemoveRange(dbContext.Albums);
+        await dbContext.SaveChangesAsync();
+        Console.WriteLine("Database cleared successfully.");
+        return;
+    }
+}
+
 app.Run();

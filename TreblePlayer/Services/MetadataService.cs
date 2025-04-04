@@ -36,7 +36,7 @@ public class MetadataService : IMetadataService
         try
         {
             _logger.LogInformation($"Getting track metadata from folder: {folderPath}");
-            
+
             if (!Directory.Exists(folderPath))
             {
                 _logger.LogError($"Folder not found: {folderPath}");
@@ -48,7 +48,7 @@ public class MetadataService : IMetadataService
                 .ToList();
 
             _logger.LogInformation($"Found {filePaths.Count} audio files in folder");
-            
+
             var metadataTasks = filePaths.Select(filePath => TrackMetadata.CreateAsync(filePath));
             var trackMetadata = await Task.WhenAll(metadataTasks);
 
@@ -113,12 +113,12 @@ public class MetadataService : IMetadataService
         }
     }
 
-    public async Task<TrackMetadata> GetTrackMetadataAsync(string filePath)
+    public async Task<TrackMetadata> GetTrackMetadataFromFileAsync(string filePath)
     {
         try
         {
             _logger.LogInformation($"Getting track metadata for file: {filePath}");
-            
+
             if (!File.Exists(filePath))
             {
                 _logger.LogError($"No file found at {filePath}");
@@ -141,7 +141,7 @@ public class MetadataService : IMetadataService
         try
         {
             _logger.LogInformation($"Starting music folder scan: {folderPath}");
-            
+
             if (!Directory.Exists(folderPath))
             {
                 _logger.LogError($"Error: Folder '{folderPath}' does not exist.");
@@ -184,6 +184,7 @@ public class MetadataService : IMetadataService
                     };
                     var album = await GetOrCreateAlbumAsync(newTrack, filePath);
                     album.Tracks.Add(newTrack);
+                    await _dbContext.SaveChangesAsync();
                     processedCount++;
                 }
                 catch (Exception ex)
@@ -208,7 +209,7 @@ public class MetadataService : IMetadataService
         try
         {
             _logger.LogInformation($"Getting or creating album for track: {track.Title}");
-            
+
             var folder = Path.GetDirectoryName(filePath);
             var album = await _dbContext.Albums
                 .Include(a => a.Tracks)
@@ -223,6 +224,7 @@ public class MetadataService : IMetadataService
                 return album;
             }
 
+            // _dbContext.Entry(existingCollection).CurrentValues.SetValues(collection);
             _logger.LogInformation($"Creating new album: {track.AlbumTitle}");
             album = new Album
             {

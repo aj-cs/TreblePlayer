@@ -24,11 +24,11 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         {
             var collection = collectionType switch
             {
-                TrackCollectionType.Album => await _dbContext.Albums.Include(a => a.Tracks)
+                TrackCollectionType.Album => (ITrackCollection)await _dbContext.Albums.Include(a => a.Tracks)
                     .FirstOrDefaultAsync(a => a.Id == collectionId),
-                TrackCollectionType.Playlist => await _dbContext.Playlists.Include(p => p.Tracks)
+                TrackCollectionType.Playlist => (ITrackCollection)await _dbContext.Playlists.Include(p => p.Tracks)
                     .FirstOrDefaultAsync(p => p.Id == collectionId),
-                TrackCollectionType.TrackQueue => await _dbContext.TrackQueues.Include(q => q.Tracks)
+                TrackCollectionType.TrackQueue => (ITrackCollection)await _dbContext.TrackQueues.Include(q => q.Tracks)
                     .FirstOrDefaultAsync(q => q.Id == collectionId),
                 _ => throw new ArgumentException("Unsupported track collection type.")
             };
