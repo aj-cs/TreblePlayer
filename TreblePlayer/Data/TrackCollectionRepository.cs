@@ -149,6 +149,14 @@ public class TrackCollectionRepository : ITrackCollectionRepository
     }
     public async Task AddQueueAsync(TrackQueue queue)
     {
+        // this part replaces every Track in queue.Tracks with the tracked one frm the dbcontext
+        var trackIds = queue.Tracks.Select(t => t.TrackId).ToList();
+        var trackedTracks = await _dbContext.Tracks
+            .Where(t => trackIds.Contains(t.TrackId))
+            .ToListAsync();
+
+        queue.Tracks = trackedTracks;
+
         await _dbContext.TrackQueues.AddAsync(queue);
         await _dbContext.SaveChangesAsync();
     }

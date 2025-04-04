@@ -39,8 +39,15 @@ public class MusicController : ControllerBase
     {
         try
         {
-            _player.Resume();
-            return Ok(new { message = "Playback resumed" });
+            bool resumed = _player.Resume();
+            if (resumed)
+            {
+                return Ok(new { message = "Playback resumed" });
+            }
+            else
+            {
+                return BadRequest(new { message = "No paused track to resume" });
+            }
         }
         catch (Exception ex)
         {
@@ -55,8 +62,15 @@ public class MusicController : ControllerBase
     {
         try
         {
-            _player.Pause();
-            return Ok(new { message = "Paused music." });
+            bool paused = _player.Pause();
+            if (paused)
+            {
+                return Ok(new { message = "Paused music." });
+            }
+            else
+            {
+                return BadRequest(new { message = "No playing track to pause." });
+            }
         }
         catch (Exception e)
         {
@@ -70,8 +84,15 @@ public class MusicController : ControllerBase
     {
         try
         {
-            _player.Stop();
-            return Ok(new { message = "Stopped music." });
+            bool stopped = _player.Stop();
+            if (stopped)
+            {
+                return Ok(new { message = "Stopped music." });
+            }
+            else
+            {
+                return BadRequest(new { message = "No playing track to stop." });
+            }
         }
         catch (Exception e)
         {

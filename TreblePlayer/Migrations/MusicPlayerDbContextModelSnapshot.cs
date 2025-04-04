@@ -158,13 +158,31 @@ namespace TreblePlayer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("CurrentTrackIndex")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("DateCreated")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsLoopEnabled")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsSessionQueue")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsShuffleEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("LastModified")
+                        .HasColumnType("TEXT");
+
+                    b.Property<float?>("LastPlaybackPositionSeconds")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("LoopTrack")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ShuffledTrackIds")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")

@@ -13,7 +13,7 @@ public class Track
     public string Artist { get; set; } = "Unknown Artist";
 
     public string? Genre { get; set; }
-    
+
     public int Bitrate { get; set; } = 128; // Default to 128 kbps if not provided
 
     [Required]

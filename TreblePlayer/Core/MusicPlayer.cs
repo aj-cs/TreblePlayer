@@ -16,10 +16,8 @@ namespace TreblePlayer.Core;
 
 public class MusicPlayer : IDisposable
 {
-    private ITrackCollection? _currentCollection;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHubContext<PlaybackHub> _hubContext;
-
     private CancellationTokenSource? _cts;
 
     private readonly MiniAudioEngine _engine;
@@ -29,10 +27,8 @@ public class MusicPlayer : IDisposable
 
     private readonly object _lock = new();
     private bool _isPlaying;
-    private bool _shuffleEnabled = false;
-
-    //tracking current collection
-    private int _currentTrackIndex;
+    public bool ShuffleEnabled = false;
+    public bool AutoAdvanceEnabled { get; set; } = true;
 
     public MusicPlayer(IServiceScopeFactory scopeFactory, IHubContext<PlaybackHub> hubContext)
     {
@@ -40,10 +36,13 @@ public class MusicPlayer : IDisposable
         _scopeFactory = scopeFactory;
         _hubContext = hubContext;
 
-        _currentCollection = null;
-        _currentTrackIndex = -1;
     }
 
+    /// <summary>
+    /// Plays the specified track. If a track is already playing or paused, then:
+    /// - If the same track is requested: resume if paused or ignore if playing.
+    /// - If a different track is requested: stop the current track and override with the new one.
+    /// </summary>
     public async Task InternalPlayAsync(Track? track, float? seekSeconds = null)
     {
         if (track == null)
@@ -51,16 +50,57 @@ public class MusicPlayer : IDisposable
             return;
         }
 
-        Stop();
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
+        // check if a player already exists for the current track.
+        // if playing, ignore duplicate play command; if paused then resume.
+        lock (_lock)
+        {
+            if (_player != null && _iterator != null && _iterator.Current != null)
+            {
+                if (_iterator.Current.TrackId == track.TrackId)
+                {
+                    if (_player.State == PlaybackState.Playing)
+                    {
+                        Console.WriteLine("MusicPlayer: Already playing the current track.");
+                        return;
+                    }
+                    else if (_player.State == PlaybackState.Paused)
+                    {
+                        Console.WriteLine("MusicPlayer: Resuming paused track.");
+                        _player.Play();
+                        _isPlaying = true;
+                        _hubContext.Clients.All.SendAsync("PlaybackResume");
+                        return;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("MusicPlayer: Overriding current track with new track.");
+                }
+            }
+            // Stop any existing playback before starting new playback.
+            Stop();
+            _cts = new CancellationTokenSource();
+        }
 
-        var stream = File.OpenRead(track.FilePath); //TODO: switch to FileService later
-        _player = new SoundPlayer(new StreamDataProvider(stream));
+        var stream = File.OpenRead(track.FilePath); // TODO: switch to FileService later
+        var provider = new StreamDataProvider(stream);
+        if (AutoAdvanceEnabled)
+        {
+            provider.EndOfStreamReached += async (sender, args) =>
+            {
+                Console.WriteLine("End of track reached. Auto advancing.");
+                await NextAsync();
+            };
+        }
+        var newPlayer = new SoundPlayer(provider);
 
-        Mixer.Master.AddComponent(_player);
-        _player.Play();
-        _isPlaying = true;
+        lock (_lock)
+        {
+            _player = newPlayer;
+            Mixer.Master.AddComponent(_player);
+            _player.Play();
+            _isPlaying = true;
+        }
 
         if (seekSeconds.HasValue)
         {
@@ -71,65 +111,11 @@ public class MusicPlayer : IDisposable
         await _hubContext.Clients.All.SendAsync("PlaybackStarted", track.TrackId);
         Console.WriteLine($"Playing: {track.Title}, ID: {track.TrackId}");
 
-        _ = Task.Run(async () =>
-                {
-                    await Task.Delay(100); // gives time to update player state from stopped to playing
-                    while (!(_player.State == PlaybackState.Stopped) && !token.IsCancellationRequested)
-                    {
-                        await Task.Delay(100);
-                    }
-
-                    lock (_lock)
-                    {
-                        _isPlaying = false;
-                        _player.Stop();
-                        Mixer.Master.RemoveComponent(_player);
-                        _player = null;
-                    }
-                    await _hubContext.Clients.All.SendAsync("PlaybackEnded", track.TrackId);
-
-
-                    await SaveActiveQueueStateAsync(); // saves queue progress
-
-                    if (_iterator == null)
-                    {
-                        return;
-                    }
-
-                    using var scope = _scopeFactory.CreateScope();
-                    var repo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
-                    var sessionQueue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
-
-                    if (sessionQueue == null)
-                    {
-                        return;
-                    }
-
-                    switch (sessionQueue.LoopTrack)
-                    {
-                        case LoopTrack.Once:
-                            sessionQueue.LoopTrack = LoopTrack.None;
-                            await repo.SaveAsync(sessionQueue);
-                            await InternalPlayAsync(_iterator.Current);
-                            break;
-                        case LoopTrack.Forever:
-                            await InternalPlayAsync(_iterator.Current);
-                            break;
-                        default:
-                            if (_iterator.HasNext)
-                            {
-                                await NextAsync();
-                            }
-                            break;
-                    }
-                    // // advance if a collection is playing
-                    // if (_iterator?.HasNext == true)
-                    // {
-                    //     await NextAsync(); // triggers internalplayasync again
-                    // }
-                }, token);
-
+        // NOTE: The background monitoring loop has been removed.
+        // If you need to auto-advance to the next track when one finishes,
+        // you'll need to implement that using an event or a more robust check.
     }
+
 
     public async Task PlayAsync(int trackId)
     {
@@ -163,42 +149,62 @@ public class MusicPlayer : IDisposable
             return;
         }
         //skip to the start index
-        var tracks = collection.Tracks.Skip(startIndex).ToList();
+        var tracks = collection.Tracks.ToList();
 
-        if (_shuffleEnabled)
+        if (ShuffleEnabled)
         {
             tracks = tracks.OrderBy(_ => Guid.NewGuid()).ToList();
         }
 
         var queueId = await CreateNowPlayingQueueAsync(tracks, $"Now playing: {collection.Title}"); // , type: {type}, typeID: {collectionId}
-        await LoadQueueAndPlayAsync(queueId);
+        await LoadQueueAndPlayAsync(queueId, startIndex);
     }
+    /// <summary>
+    /// pauses playback if a track is playing
+    /// retunrs true if pause succeeded, false if nothing was playing
+    /// </summary>
 
-    public void Pause()
+    public bool Pause()
     {
         lock (_lock)
         {
-            if (_player?.State == PlaybackState.Playing)
+            if (_player == null || _player.State != PlaybackState.Playing)
             {
-                _player?.Pause();
-                _isPlaying = false;
-                _ = SaveActiveQueueStateAsync(); // persist s the paused pos
-                _hubContext.Clients.All.SendAsync("PlaybackPaused");
-                Console.WriteLine("Paused");
-
+                Console.WriteLine("MusicPlayer: Cannot pause, no track is playing");
+                return false;
             }
+            _player?.Pause();
+            _isPlaying = false;
+            _ = SaveActiveQueueStateAsync(); // persist s the paused pos
+            _hubContext.Clients.All.SendAsync("PlaybackPaused");
+            Console.WriteLine("Paused");
+            return true;
         }
     }
-
-    public void Stop()
+    /// <summary>
+    /// stops playback if a track is playing
+    /// retunrs true if stop succeeded, false if nothing was playing
+    /// </summary>
+    public bool Stop()
     {
         lock (_lock)
         {
+            if (_player == null)
+            {
+                Console.WriteLine("MusicPlayer: No active track to stop");
+                return false;
+            }
             _cts?.Cancel();
-
             _ = SaveActiveQueueStateAsync(); // persist the queue state before stopping
 
-            _player?.Stop();
+            try
+            {
+                _player?.Stop();
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.WriteLine($"Warning: _player.Stop() failed - {ex.Message}");
+            }
             _isPlaying = false;
 
 
@@ -210,20 +216,28 @@ public class MusicPlayer : IDisposable
 
             _hubContext.Clients.All.SendAsync("PlaybackStopped");
             Console.WriteLine("Stopped");
+            return true;
         }
     }
-
-    public void Resume()
+    /// <summary>
+    /// resumes playback if a track is paused
+    /// retunrs true if resume succeeded, false if no track is paused
+    /// </summary>
+    public bool Resume()
     {
         lock (_lock)
         {
-            if (_player?.State == PlaybackState.Paused)
+            if (_player == null || _player.State != PlaybackState.Paused)
             {
-                _player.Play();
-                _isPlaying = true;
-                _hubContext.Clients.All.SendAsync("PlaybackResume");
-                Console.WriteLine("Resumed");
+                Console.WriteLine("MusicPlayer: Cannot resume, no track is paused.");
+                return false;
             }
+
+            _player.Play();
+            _isPlaying = true;
+            _hubContext.Clients.All.SendAsync("PlaybackResume");
+            Console.WriteLine("Resumed");
+            return true;
         }
     }
 
@@ -369,7 +383,7 @@ public class MusicPlayer : IDisposable
 
     }
 
-    public async Task LoadQueueAndPlayAsync(int queueId)
+    public async Task LoadQueueAndPlayAsync(int queueId, int startIndex = 0)
     {
         using var scope = _scopeFactory.CreateScope();
         var collectionRepo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
@@ -391,8 +405,10 @@ public class MusicPlayer : IDisposable
             .Where(t => t != null)!
             .ToList();
 
-        _iterator = new TrackIterator(orderedTracks, queue.CurrentTrackIndex ?? 0);
+        int effectiveIndex = startIndex != 0 ? startIndex : (queue.CurrentTrackIndex ?? 0);
+        _iterator = new TrackIterator(orderedTracks, effectiveIndex);
         queue.IsSessionQueue = true;
+        queue.CurrentTrackIndex = startIndex;
         await collectionRepo.SaveAsync(queue);
 
         if (queue.LastPlaybackPositionSeconds.HasValue)
@@ -462,8 +478,8 @@ public class MusicPlayer : IDisposable
 
     public void EnableShuffle(bool enable = true)
     {
-        _shuffleEnabled = enable;
-        Console.WriteLine($"Shuffle mode: {(_shuffleEnabled ? "Enabled" : "Disabled")}");
+        ShuffleEnabled = enable;
+        Console.WriteLine($"Shuffle mode: {(ShuffleEnabled ? "Enabled" : "Disabled")}");
         _ = Task.Run(async () =>
         {
             using var scope = _scopeFactory.CreateScope();
@@ -476,7 +492,7 @@ public class MusicPlayer : IDisposable
                 {
                     queue.SetShuffledOrder(
                             queue.Tracks
-                            .OrderBy(_ => _shuffleEnabled ? Guid.NewGuid() : Guid.Empty)
+                            .OrderBy(_ => ShuffleEnabled ? Guid.NewGuid() : Guid.Empty)
                             .Select(t => t.TrackId)
                             .ToList());
 
@@ -547,45 +563,3 @@ public class MusicPlayer : IDisposable
         }
     }
 }
-// public async Task CreateQueueFromAlbumOrPlaylistAsync(int collectionId, TrackCollectionType type)
-// {
-//     //change later, 
-//     // queues should be created from track(s) aka IEnumerable/ICollection<Track> or an ITrackCollection
-//     //temporary queue logic, final musicplayer.cs
-//     ITrackCollection collection = type switch
-//     {
-//         TrackCollectionType.Album =>
-//             collection = await _collectionRepository.GetTrackCollectionByIdAsync(collectionId, TrackCollectionType.Album) as Album,
-//
-//         TrackCollectionType.Playlist =>
-//             collection = await _collectionRepository.GetTrackCollectionByIdAsync(collectionId, TrackCollectionType.Album) as Playlist,
-//
-//         _ => throw new ArgumentException("Cannot create new queue out of existing queue.")
-//
-//     };
-//
-//     if (collection == null)
-//     {
-//         throw new Exception("Invalid collection type or collection not found.");
-//     }
-//     //if (string.IsNullOrWhiteSpace(title))
-//     //{
-//     //    throw new Exception("Queue title cannot be null or empty.");
-//     //}
-//
-//     TrackQueue newQueue = TrackQueue.CreateFromCollection(collection);
-//     await _collectionRepository.AddQueueAsync(newQueue);
-// }
-//
-// public async Task CreateQueueFromTracksAsync(int[] trackIds)
-// {
-//     List<Track> tracks = new List<Track>();
-//     if (trackIds.Count() == 1)
-//     {
-//         await _trackRepository.GetTrackByIdAsync(trackIds[0]);
-//     }
-//     else
-//     {
-//         tracks.AddRange(await _trackRepository.GetTracksByIdAsync(trackIds));
-//     }
-// }
