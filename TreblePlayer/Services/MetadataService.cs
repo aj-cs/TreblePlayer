@@ -8,6 +8,7 @@ using TreblePlayer.Models;
 using TreblePlayer.Data;
 using Microsoft.EntityFrameworkCore;
 using System;
+using System.Collections.Concurrent;
 
 namespace TreblePlayer.Services;
 
@@ -135,7 +136,78 @@ public class MetadataService : IMetadataService
             throw;
         }
     }
+    public async Task ScanMusicFromDirectoryAsync(List<string> directories)
+    {
+        try
+        {
+            _logger.LogInformation($"Starting music scan from {directories.Count} directories");
 
+            // First, collect all folders concurrently
+            var allFolders = new ConcurrentBag<string>();
+            var folderTasks = directories.Select(async directory =>
+            {
+                try
+                {
+                    if (!Directory.Exists(directory))
+                    {
+                        _logger.LogWarning($"Directory not found: {directory}");
+                        return;
+                    }
+
+                    var folders = Directory.GetDirectories(directory, "*", SearchOption.AllDirectories);
+                    foreach (var folder in folders)
+                    {
+                        allFolders.Add(folder);
+                    }
+                    _logger.LogInformation($"Found {folders.Length} folders in {directory}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Error scanning directory {directory}: {ex.Message}");
+                }
+            });
+            await Task.WhenAll(folderTasks);
+
+            _logger.LogInformation($"Found total of {allFolders.Count} folders to scan");
+
+            // batches to avoid overwhelming the database
+            var batchSize = 5;
+            var folderList = allFolders.ToList();
+
+            for (int i = 0; i < folderList.Count; i += batchSize)
+            {
+                var batch = folderList.Skip(i).Take(batchSize);
+                // could one line it without debug
+                // var scanTasks = batch.Select(folder => ScanMusicFolderAsync(folder));
+                var scanTasks = batch.Select(async folder =>
+                {
+                    try
+                    {
+                        await ScanMusicFolderAsync(folder);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"Error scanning folder {folder}: {ex.Message}");
+                    }
+                });
+                await Task.WhenAll(scanTasks);
+
+                // add a small delay between batches to prevent any possible
+                // database stress
+                if (i + batchSize < folderList.Count)
+                {
+                    await Task.Delay(100);
+                }
+            }
+
+            _logger.LogInformation("Completed scanning all directories");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error in ScanMusicFromDirectoryAsync: {ex.Message}");
+            throw;
+        }
+    }
     public async Task ScanMusicFolderAsync(string folderPath)
     {
         try

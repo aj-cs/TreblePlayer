@@ -252,6 +252,4 @@ public class MusicController : ControllerBase
             return StatusCode(500, new { message = "Failed to toggle loop mode." });
         }
     }
-
-
 }

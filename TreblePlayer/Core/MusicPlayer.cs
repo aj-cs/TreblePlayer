@@ -7,11 +7,8 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using SoundFlow.Abstracts;
-using SoundFlow.Backends.MiniAudio;
-using SoundFlow.Components;
-using SoundFlow.Providers;
-using SoundFlow.Enums;
 using TreblePlayer.Services;
+using LibVLCSharp.Shared;
 
 namespace TreblePlayer.Core;
 
@@ -20,21 +17,24 @@ public class MusicPlayer : IDisposable
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHubContext<PlaybackHub> _hubContext;
     private readonly ILoggingService _logger;
-    private CancellationTokenSource? _cts;
+    // private CancellationTokenSource? _cts;
 
-    private readonly MiniAudioEngine _engine;
-    private SoundPlayer? _player;
+    private readonly LibVLC _libVlc;
+    private MediaPlayer? _player;
+    private Media? _currentMedia;
 
     private TrackIterator? _iterator;
 
     private readonly object _lock = new();
     private bool _isPlaying;
     public bool ShuffleEnabled = false;
+    private bool _isAdvancing = false;
     public bool AutoAdvanceEnabled { get; set; } = true;
 
     public MusicPlayer(IServiceScopeFactory scopeFactory, IHubContext<PlaybackHub> hubContext, ILoggingService logger)
     {
-        _engine = new MiniAudioEngine(44100, Capability.Playback);
+        LibVLCSharp.Shared.Core.Initialize();
+        _libVlc = new LibVLC();
         _scopeFactory = scopeFactory;
         _hubContext = hubContext;
         _logger = logger;
@@ -51,65 +51,52 @@ public class MusicPlayer : IDisposable
         {
             return;
         }
-
         // check if a player already exists for the current track.
         // if playing, ignore duplicate play command; if paused then resume.
         lock (_lock)
         {
-            if (_player != null && _iterator != null && _iterator.Current != null)
-            {
-                if (_iterator.Current.TrackId == track.TrackId)
-                {
-                    if (_player.State == PlaybackState.Playing)
-                    {
-                        _logger.LogInformation("MusicPlayer: Already playing the current track.");
-                        return;
-                    }
-                    else if (_player.State == PlaybackState.Paused)
-                    {
-                        _logger.LogInformation("MusicPlayer: Resuming paused track.");
-                        _player.Play();
-                        _isPlaying = true;
-                        _hubContext.Clients.All.SendAsync("PlaybackResume");
-                        return;
-                    }
-                }
-                else
-                {
-                    _logger.LogInformation("MusicPlayer: Overriding current track with new track.");
-                }
-            }
-            // Stop any existing playback before starting new playback.
             Stop();
-            _cts = new CancellationTokenSource();
         }
 
-        var stream = File.OpenRead(track.FilePath); // TODO: switch to FileService later
-        var provider = new StreamDataProvider(stream);
+        _logger.LogInformation($"MusicPlayer: Preparing to play track (ID: {track.TrackId})");
+        _currentMedia = new Media(_libVlc, new Uri(track.FilePath)); // TODO: switch to FileService later
+        _player = new MediaPlayer(_currentMedia);
+
+        //if (AutoAdvanceEnabled)
+        //{
+        //    provider.EndOfStreamReached += async (sender, args) =>
+        //    {
+        //        _logger.LogInformation("End of track reached. Auto advancing.");
+        //        await NextAsync();
+        //    };
+        //}
         if (AutoAdvanceEnabled)
         {
-            provider.EndOfStreamReached += async (sender, args) =>
+            _player.EndReached += (_, _) =>
             {
-                _logger.LogInformation("End of track reached. Auto advancing.");
-                await NextAsync();
+                var current = _iterator?.Current;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        _logger.LogInformation($"End of track (ID: {current?.TrackId}, Title: {current?.Title}) reached. Auto-advancing.");
+                        await NextAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"Error during auto-advance: {ex.Message}");
+                    }
+                });
             };
         }
-        var newPlayer = new SoundPlayer(provider);
-
-        lock (_lock)
-        {
-            _player = newPlayer;
-            Mixer.Master.AddComponent(_player);
-            _player.Play();
-            _isPlaying = true;
-        }
+        _player.Play();
 
         if (seekSeconds.HasValue)
         {
-            _player.Seek(seekSeconds.Value);
+            _player.Time = (long)(seekSeconds.Value * 1000);
             _logger.LogInformation($"Resumed at {seekSeconds.Value} seconds");
         }
-
+        _isPlaying = true;
         await _hubContext.Clients.All.SendAsync("PlaybackStarted", track.TrackId);
         _logger.LogInformation($"Playing: {track.Title}, ID: {track.TrackId}");
 
@@ -129,6 +116,7 @@ public class MusicPlayer : IDisposable
         {
             throw new Exception("Track not found");
         }
+        _logger.LogWarning("Calling CreateNowPlayingQueueAsync from PlayAsync");
         var queueId = await CreateNowPlayingQueueAsync(new List<Track> { track }, $"Now playing track: {track.Title}");
 
         await LoadQueueAndPlayAsync(queueId);
@@ -158,6 +146,7 @@ public class MusicPlayer : IDisposable
             tracks = tracks.OrderBy(_ => Guid.NewGuid()).ToList();
         }
 
+        _logger.LogWarning("Calling CreateNowPlayingQueueAsync from PlayCollectionAsync");
         var queueId = await CreateNowPlayingQueueAsync(tracks, $"Now playing: {collection.Title}"); // , type: {type}, typeID: {collectionId}
         await LoadQueueAndPlayAsync(queueId, startIndex);
     }
@@ -170,12 +159,12 @@ public class MusicPlayer : IDisposable
     {
         lock (_lock)
         {
-            if (_player == null || _player.State != PlaybackState.Playing)
+            if (_player == null || !_player.IsPlaying)
             {
                 _logger.LogWarning("MusicPlayer: Cannot pause, no track is playing");
                 return false;
             }
-            _player?.Pause();
+            _player.Pause();
             _isPlaying = false;
             _ = SaveActiveQueueStateAsync(); // persist s the paused pos
             _hubContext.Clients.All.SendAsync("PlaybackPaused");
@@ -196,25 +185,21 @@ public class MusicPlayer : IDisposable
                 _logger.LogWarning("MusicPlayer: No active track to stop");
                 return false;
             }
-            _cts?.Cancel();
             _ = SaveActiveQueueStateAsync(); // persist the queue state before stopping
 
             try
             {
-                _player?.Stop();
+                _player.Stop();
+                _player.Dispose();
+                _currentMedia?.Dispose();
             }
             catch (InvalidOperationException ex)
             {
                 _logger.LogWarning($"Warning: _player.Stop() failed - {ex.Message}");
             }
             _isPlaying = false;
-
-
-            if (_player != null)
-            {
-                Mixer.Master.RemoveComponent(_player);
-                _player = null;
-            }
+            _player = null;
+            _currentMedia = null;
 
             _hubContext.Clients.All.SendAsync("PlaybackStopped");
             _logger.LogInformation("Stopped");
@@ -229,7 +214,7 @@ public class MusicPlayer : IDisposable
     {
         lock (_lock)
         {
-            if (_player == null || _player.State != PlaybackState.Paused)
+            if (_player == null || _player.IsPlaying)
             {
                 _logger.LogWarning("MusicPlayer: Cannot resume, no track is paused.");
                 return false;
@@ -247,17 +232,22 @@ public class MusicPlayer : IDisposable
     {
         lock (_lock)
         {
-            _player?.Seek(seconds);
-            _hubContext.Clients.All.SendAsync("PlaybackSeeked", seconds);
-            _logger.LogInformation($"Seeked to {seconds} seconds");
+            if (_player != null)
+            {
+
+                _player.Time = (long)(seconds * 1000);
+                _hubContext.Clients.All.SendAsync("PlaybackSeeked", seconds);
+                _logger.LogInformation($"Seeked to {seconds} seconds");
+            }
         }
     }
 
     public bool IsPlaying()
     {
-        return _isPlaying && _player?.State == PlaybackState.Playing;
-
+        return _isPlaying && _player?.IsPlaying == true;
     }
+
+    public float? CurrentPositionSeconds => _player?.Time / 1000f;
 
     public async Task NextAsync()
     {
@@ -285,17 +275,6 @@ public class MusicPlayer : IDisposable
         {
             await InternalPlayAsync(_iterator.Previous);
         }
-    }
-
-    private void CleanUpPlayer()
-    {
-        if (_player != null)
-        {
-            Mixer.Master.RemoveComponent(_player);
-            _player = null;
-        }
-        _cts?.Dispose();
-        _cts = null;
     }
 
     public async Task CreateQueueAsync(string title)
@@ -433,13 +412,14 @@ public class MusicPlayer : IDisposable
         if (sessionQueue != null && _iterator != null)
         {
             sessionQueue.CurrentTrackIndex = _iterator.CurrentIndex;
-            sessionQueue.LastPlaybackPositionSeconds = _player?.Time;
+            sessionQueue.LastPlaybackPositionSeconds = CurrentPositionSeconds;
             await repo.SaveAsync(sessionQueue);
         }
     }
 
-    public async Task<int> CreateNowPlayingQueueAsync(List<Track> tracks, string title)
+    public async Task<int> CreateNowPlayingQueueAsync(List<Track> tracks, string title, int? collectionId = null)
     {
+        _logger.LogWarning($"CreateNowPlayingQueueAsync called with {tracks.Count} tracks, title: {title}");
         using var scope = _scopeFactory.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
 
@@ -559,7 +539,7 @@ public class MusicPlayer : IDisposable
     public void Dispose()
     {
         Stop();
-        _engine.Dispose();
-        _logger.LogInformation("Disposed engine");
+        _libVlc.Dispose();
+        _logger.LogInformation("Disposed LibVLC");
     }
 }

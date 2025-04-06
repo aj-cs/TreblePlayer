@@ -10,9 +10,10 @@ public interface IMetadataService
     Task<AlbumMetadata> GetAlbumMetadataAsync(IEnumerable<string> trackFilePaths);
     Task<AlbumMetadata> GetAlbumMetadataFromFolderAsync(string folderPath);
 
-    Task<List<TrackMetadata>> GetTracksByAlbumAsync(string folderPath, string albumTitle);
+    Task<List<TrackMetadata>> GetTracksByAlbumAsync(string folderPath, string artistName);
 
     Task ScanMusicFolderAsync(string folderPath);
+    Task ScanMusicFromDirectoryAsync(List<string> directories);
 
     //Task<List<TrackMetadata>> GetTracksByArtistAsync(string folderPath, string artistName);
     //Task<List<string>> GetDistinctArtistsAsync(string folderPath);
