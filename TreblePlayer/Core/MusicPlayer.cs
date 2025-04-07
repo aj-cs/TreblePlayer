@@ -61,6 +61,7 @@ public class MusicPlayer : IDisposable
         _logger.LogInformation($"MusicPlayer: Preparing to play track (ID: {track.TrackId})");
         _currentMedia = new Media(_libVlc, new Uri(track.FilePath)); // TODO: switch to FileService later
         _player = new MediaPlayer(_currentMedia);
+        _player.EnableHardwareDecoding = false;
 
         //if (AutoAdvanceEnabled)
         //{
@@ -74,17 +75,47 @@ public class MusicPlayer : IDisposable
         {
             _player.EndReached += (_, _) =>
             {
-                var current = _iterator?.Current;
+                var currentTrack = _iterator?.Current; // Capture current track before async operation
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        _logger.LogInformation($"End of track (ID: {current?.TrackId}, Title: {current?.Title}) reached. Auto-advancing.");
-                        await NextAsync();
+                        using var scope = _scopeFactory.CreateScope();
+                        var repo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
+                        var activeQueue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
+
+                        if (activeQueue == null || currentTrack == null)
+                        {
+                             _logger.LogWarning("EndReached: Active queue or current track not found, cannot determine loop behavior.");
+                             await NextAsync(); // Default behavior if queue/track is missing
+                             return;
+                        }
+
+
+                        _logger.LogInformation($"End of track (ID: {currentTrack.TrackId}, Title: {currentTrack.Title}) reached. Checking loop mode ({activeQueue.LoopTrack}).");
+
+                        switch (activeQueue.LoopTrack)
+                        {
+                            case LoopTrack.Forever:
+                                _logger.LogInformation("Looping track forever.");
+                                await InternalPlayAsync(currentTrack);
+                                break;
+                            case LoopTrack.Once:
+                                _logger.LogInformation("Looping track once. Setting mode to None and replaying.");
+                                activeQueue.LoopTrack = LoopTrack.None;
+                                await repo.SaveAsync(activeQueue); // Save the updated loop mode
+                                await InternalPlayAsync(currentTrack);
+                                break;
+                            case LoopTrack.None:
+                            default:
+                                _logger.LogInformation("Auto-advancing to next track.");
+                                await NextAsync();
+                                break;
+                        }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError($"Error during auto-advance: {ex.Message}");
+                        _logger.LogError($"Error during track end handling/auto-advance: {ex.Message}", ex);
                     }
                 });
             };
@@ -390,11 +421,11 @@ public class MusicPlayer : IDisposable
             var shuffledIds = queue.GetShuffledOrder();
             if (shuffledIds.Any())
             {
-                 orderedTracks = shuffledIds
-                    .Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id))
-                    .Where(t => t != null)
-                    .Select(t => t!)  // Tell compiler this is non-null
-                    .ToList();
+                orderedTracks = shuffledIds
+                   .Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id))
+                   .Where(t => t != null)
+                   .Select(t => t!)  // Tell compiler this is non-null
+                   .ToList();
             }
             else
             {
@@ -489,30 +520,49 @@ public class MusicPlayer : IDisposable
         {
             using var scope = _scopeFactory.CreateScope();
             var repo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
+            // find the currently active session queue
             var queue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
             if (queue != null)
             {
                 queue.IsShuffleEnabled = enable;
+                List<int> newOrderIds;
                 if (enable)
                 {
                     _logger.LogInformation($"Generating and saving shuffled order for queue {queue.Id}");
-                    queue.SetShuffledOrder(
-                            queue.Tracks
+                    newOrderIds = queue.Tracks
                             .OrderBy(_ => Guid.NewGuid())
                             .Select(t => t.TrackId)
-                            .ToList());
+                            .ToList();
+                    queue.SetShuffledOrder(newOrderIds);
 
                 }
                 else // When disabling shuffle, set order to TrackNumber
                 {
                     _logger.LogInformation($"Generating and saving TrackNumber order for queue {queue.Id}");
-                    queue.SetShuffledOrder(
-                            queue.Tracks
+                    newOrderIds = queue.Tracks
                             .OrderBy(t => t.TrackNumber)
                             .Select(t => t.TrackId)
-                            .ToList());
+                            .ToList();
+                    queue.SetShuffledOrder(newOrderIds);
                 }
                 await repo.SaveAsync(queue);
+
+                // If this is the currently active queue, update the live iterator
+                // Check if the iterator exists and corresponds to this queue (simple check: is it the session queue?)
+                if (_iterator != null && queue.IsSessionQueue) // queue.IsSessionQueue should implicitly be true here, but double-check is safe
+                {
+                    _logger.LogInformation("Re-initializing active iterator with new track order.");
+                    // Re-fetch the tracks based on the new ID order
+                    var orderedTracks = newOrderIds
+                       .Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id))
+                       .Where(t => t != null)
+                       .Select(t => t!)  // Tell compiler this is non-null
+                       .ToList();
+                    // Preserve current track index if possible? For now, just reset to 0
+                    // TODO: Maybe preserve index if track is still in the shuffled list?
+                     _iterator = new TrackIterator(orderedTracks, 0, _logger);
+                    _logger.LogDebug("Active iterator re-initialized.");
+                }
             }
         }
         );
