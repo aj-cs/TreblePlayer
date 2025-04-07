@@ -142,6 +142,9 @@ namespace TreblePlayer.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("TrackNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("Year")
                         .HasColumnType("INTEGER");
 

@@ -8,6 +8,7 @@ public class TrackMetadata
     public string Genre { get; set; }
     public int Duration { get; set; }  // Duration in seconds
     public int? Year { get; set; }
+    public int? TrackNumber { get; set; }
     public string FilePath { get; set; }
 
     public TrackMetadata(string filePath)
@@ -19,6 +20,7 @@ public class TrackMetadata
         Album = track.Album;
         Artist = track.Artist;
         Genre = track.Genre;
+        TrackNumber = track.TrackNumber;
         Duration = track.Duration;
         Year = track.Year;
     }

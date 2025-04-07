@@ -249,6 +249,7 @@ public class MetadataService : IMetadataService
                         Bitrate = metadata.Bitrate,
                         Year = metadata.Year ?? null,
                         Genre = metadata.Genre ?? "Unknown Genre",
+                        TrackNumber = metadata.TrackNumber,
                         DateCreated = DateTime.UtcNow,
                         LastModified = DateTime.UtcNow,
                         FilePath = filePath,

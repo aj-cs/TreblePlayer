@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.SignalR;
 using SoundFlow.Abstracts;
 using TreblePlayer.Services;
 using LibVLCSharp.Shared;
+using System.Linq;
 
 namespace TreblePlayer.Core;
 
@@ -28,7 +29,6 @@ public class MusicPlayer : IDisposable
     private readonly object _lock = new();
     private bool _isPlaying;
     public bool ShuffleEnabled = false;
-    private bool _isAdvancing = false;
     public bool AutoAdvanceEnabled { get; set; } = true;
 
     public MusicPlayer(IServiceScopeFactory scopeFactory, IHubContext<PlaybackHub> hubContext, ILoggingService logger)
@@ -139,15 +139,17 @@ public class MusicPlayer : IDisposable
             return;
         }
         //skip to the start index
-        var tracks = collection.Tracks.ToList();
+        var tracks = collection.Tracks.OrderBy(t => t.TrackNumber).ToList(); // Sort initially by track number
 
+        // the ShuffleEnabled flag here determines the initial state if creating a new queue
+        // but the persisted IsShuffleEnabled on the queue takes precedence when loading
         if (ShuffleEnabled)
         {
             tracks = tracks.OrderBy(_ => Guid.NewGuid()).ToList();
         }
 
         _logger.LogWarning("Calling CreateNowPlayingQueueAsync from PlayCollectionAsync");
-        var queueId = await CreateNowPlayingQueueAsync(tracks, $"Now playing: {collection.Title}"); // , type: {type}, typeID: {collectionId}
+        var queueId = await CreateNowPlayingQueueAsync(tracks, $"Now playing: {collection.Title}");
         await LoadQueueAndPlayAsync(queueId, startIndex);
     }
     /// <summary>
@@ -381,11 +383,31 @@ public class MusicPlayer : IDisposable
             return;
         }
 
-        var orderedTracks = queue.GetShuffledOrder()
-            .Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id))
-            .Where(t => t != null)
-            .Select(t => t!)  // Tell compiler this is non-null
-            .ToList();
+        List<Track> orderedTracks;
+        if (queue.IsShuffleEnabled)
+        {
+            _logger.LogDebug($"Queue {queue.Id} has shuffle enabled, using ShuffledTrackIds.");
+            var shuffledIds = queue.GetShuffledOrder();
+            if (shuffledIds.Any())
+            {
+                 orderedTracks = shuffledIds
+                    .Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id))
+                    .Where(t => t != null)
+                    .Select(t => t!)  // Tell compiler this is non-null
+                    .ToList();
+            }
+            else
+            {
+                // Fallback if shuffle is enabled but ShuffledTrackIds is empty/invalid
+                _logger.LogWarning($"Shuffle enabled for queue {queue.Id} but ShuffledTrackIds is empty. Falling back to TrackNumber order.");
+                orderedTracks = queue.Tracks.OrderBy(t => t.TrackNumber).ToList();
+            }
+        }
+        else
+        {
+            _logger.LogDebug($"Queue {queue.Id} has shuffle disabled, ordering by TrackNumber.");
+            orderedTracks = queue.Tracks.OrderBy(t => t.TrackNumber).ToList();
+        }
 
         int effectiveIndex = startIndex != 0 ? startIndex : (queue.CurrentTrackIndex ?? 0);
         _iterator = new TrackIterator(orderedTracks, effectiveIndex, _logger);
@@ -473,12 +495,22 @@ public class MusicPlayer : IDisposable
                 queue.IsShuffleEnabled = enable;
                 if (enable)
                 {
+                    _logger.LogInformation($"Generating and saving shuffled order for queue {queue.Id}");
                     queue.SetShuffledOrder(
                             queue.Tracks
-                            .OrderBy(_ => ShuffleEnabled ? Guid.NewGuid() : Guid.Empty)
+                            .OrderBy(_ => Guid.NewGuid())
                             .Select(t => t.TrackId)
                             .ToList());
 
+                }
+                else // When disabling shuffle, set order to TrackNumber
+                {
+                    _logger.LogInformation($"Generating and saving TrackNumber order for queue {queue.Id}");
+                    queue.SetShuffledOrder(
+                            queue.Tracks
+                            .OrderBy(t => t.TrackNumber)
+                            .Select(t => t.TrackId)
+                            .ToList());
                 }
                 await repo.SaveAsync(queue);
             }

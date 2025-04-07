@@ -1,6 +1,7 @@
 using TreblePlayer.Models;
 using System.Threading.Tasks;
 using TreblePlayer.Services;
+using System.Linq;
 
 namespace TreblePlayer.Services;
 
@@ -71,6 +72,7 @@ public class FileService : IFileService
             }
 
             var trackFiles = Directory.GetFiles(folderPath)
+                .OrderBy(path => path)
                 .ToList();
 
             if (!trackFiles.Any())
@@ -110,6 +112,7 @@ public class FileService : IFileService
                         Duration = trackMetadata.Duration,
                         DateCreated = DateTime.UtcNow,
                         LastModified = DateTime.UtcNow,
+                        TrackNumber = trackMetadata.TrackNumber,
                         FilePath = trackMetadata.FilePath ?? "Unknown File"
                     };
                     album.AddTrack(track);
@@ -121,6 +124,9 @@ public class FileService : IFileService
                     // Continue processing other tracks even if one fails
                 }
             }
+
+            // Order tracks by TrackNumber before returning
+            album.Tracks = album.Tracks.OrderBy(t => t.TrackNumber).ToList();
 
             _logger.LogInformation($"Successfully loaded album: {album.Title} with {album.Tracks.Count} tracks");
             return album;

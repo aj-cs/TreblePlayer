@@ -34,6 +34,7 @@ public class Track
 
     public int? AlbumId { get; set; } // Foreign key to album 
     public Album? Album { get; set; }
+    public int? TrackNumber {get; set;}
 
     public ICollection<Playlist> Playlists { get; set; } = new List<Playlist>();
     public ICollection<TrackQueue> TrackQueues { get; set; } = new List<TrackQueue>();
