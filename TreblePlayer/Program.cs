@@ -6,6 +6,8 @@ using TreblePlayer.Core;
 using TreblePlayer.Services;
 using TreblePlayer.Models;
 using Microsoft.Extensions.Logging;
+using System.IO;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +42,7 @@ builder.Services.AddScoped<ITrackCollectionRepository, TrackCollectionRepository
 
 builder.Services.AddScoped<IMetadataService, MetadataService>();
 builder.Services.AddScoped<IFileService, FileService>();
+builder.Services.AddScoped<IArtworkService, ArtworkService>();
 builder.Services.AddSingleton<ILoggingService, LoggingService>();
 builder.Services.AddSingleton<MusicPlayer>(sp =>
 {
@@ -50,6 +53,55 @@ builder.Services.AddSingleton<MusicPlayer>(sp =>
 });
 
 var app = builder.Build();
+
+// Ensure artwork directory and placeholder exists
+var artworkBasePath = Path.Combine(AppContext.BaseDirectory, "artwork");
+if (!Directory.Exists(artworkBasePath))
+{
+    try
+    {
+        Directory.CreateDirectory(artworkBasePath);
+        Console.WriteLine($"Created artwork directory at: {artworkBasePath}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error creating artwork directory: {ex.Message}");
+        // Decide if you want to throw or continue if directory creation fails
+    }
+}
+
+var placeholderPath = Path.Combine(artworkBasePath, "placeholder.png");
+if (!File.Exists(placeholderPath))
+{
+    Console.WriteLine($"Placeholder file not found at {placeholderPath}. Attempting to extract from embedded resources...");
+    var assembly = Assembly.GetExecutingAssembly();
+    // IMPORTANT: Ensure this matches the LogicalName in your .csproj
+    var resourceName = "TreblePlayer.artwork.placeholder.png"; 
+
+    try
+    {
+        using (Stream? resourceStream = assembly.GetManifestResourceStream(resourceName))
+        {
+            if (resourceStream == null)
+            {
+                Console.WriteLine($"Error: Embedded resource '{resourceName}' not found in assembly.");
+            }
+            else
+            {
+                using (var fileStream = new FileStream(placeholderPath, FileMode.Create, FileAccess.Write))
+                {
+                    await resourceStream.CopyToAsync(fileStream); // Use async version
+                }
+                Console.WriteLine($"Successfully extracted embedded placeholder to: {placeholderPath}");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error extracting embedded resource '{resourceName}': {ex.Message}");
+        // Log the error, the application might still function but without a default image
+    }
+}
 
 using (var scope = app.Services.CreateScope())
 {

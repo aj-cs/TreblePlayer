@@ -1,10 +1,9 @@
-using ATL.AudioData;
 using TreblePlayer.Models;
 using TreblePlayer.Models.Metadata;
 
 namespace TreblePlayer.Services;
 
-public interface IAlbumArtworkService
+public interface IArtworkService
 {
     /// <summary>
     /// Attempts to extract and save artwork for a track and/or its album.
@@ -12,6 +11,7 @@ public interface IAlbumArtworkService
     /// <param name="track">The track to extract artwork from.</param>
     /// <returns>The file path to the saved artwork image, or null if none found.</returns>
     Task<string?> ExtractAndSaveArtworkAsync(Track track);
+
     /// <summary>
     /// Gets the local file path to the artwork for a specific track.
     /// Prioritizes track artwork, then album artwork, then fallback.
@@ -19,7 +19,9 @@ public interface IAlbumArtworkService
     /// <param name="track">The track to get artwork for.</param>
     /// <returns>The path to the artwork image or a default fallback image.</returns>
     Task<string> GetArtworkPathAsync(Track track);
+
     //Task<string?> FetchArtworkFromWebAsync(Album album)
+
     /// <summary>
     /// Attempts to assign artwork to an album using the following priority:
     /// 1. A local image (cover.png) in the album folder

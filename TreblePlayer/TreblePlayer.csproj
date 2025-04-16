@@ -19,6 +19,18 @@
         <PackageReference Include="Swashbuckle.AspNetCore" Version="6.8.1" />
         <PackageReference Include="z440.atl.core" Version="6.5.0" />
     </ItemGroup>
+    <ItemGroup>
+        <Content Include="artwork\**" CopyToPublishDirectory="PreserveNewest" CopyToOutputDirectory="Never" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <EmbeddedResource Include="artwork\placeholder.png">
+        <LogicalName>TreblePlayer.artwork.placeholder.png</LogicalName>
+      </EmbeddedResource>
+      <EmbeddedResource Include="artwork\track.png">
+        <LogicalName>TreblePlayer.artwork.track.png</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
 
     
     <Target Name="CopyLibMiniAudio" AfterTargets="Build">

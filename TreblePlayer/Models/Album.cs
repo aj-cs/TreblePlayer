@@ -8,7 +8,10 @@ public class Album : ITrackCollection
 
     public string Title { get; set; }
     public int Size { get => Tracks?.Count ?? 0; }
+
     public string? AlbumArtist { get; set; }
+    public string? ArtworkPath {get; set;}
+
     public string Genre { get; set; }
     public string FolderPath { get; set; }
     public int? Year { get; set; }

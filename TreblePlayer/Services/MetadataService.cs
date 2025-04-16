@@ -17,6 +17,7 @@ public class MetadataService : IMetadataService
     private readonly MusicPlayerDbContext _dbContext;
     private readonly ITrackRepository _trackRepository;
     private readonly ITrackCollectionRepository _collectionRepository;
+    private readonly IArtworkService _artworkService;
     private readonly ILoggingService _logger;
     private static readonly string[] SupportedExtensions = { ".mp3", ".flac", ".alac", ".opus", ".wav", ".aac", ".ogg" };
 
@@ -24,11 +25,13 @@ public class MetadataService : IMetadataService
         MusicPlayerDbContext dbContext,
         ITrackRepository trackRepository,
         ITrackCollectionRepository collectionRepository,
+        IArtworkService artworkService,
         ILoggingService logger)
     {
         _dbContext = dbContext;
         _trackRepository = trackRepository;
         _collectionRepository = collectionRepository;
+        _artworkService = artworkService;
         _logger = logger;
     }
 
@@ -257,7 +260,12 @@ public class MetadataService : IMetadataService
                     };
                     var album = await GetOrCreateAlbumAsync(newTrack, filePath);
                     album.Tracks.Add(newTrack);
-                    await _dbContext.SaveChangesAsync();
+
+                    // Set artwork after adding the track to the album's collection
+                    await _artworkService.SetAlbumArtworkAsync(album);
+                    await _artworkService.SetTrackArtworkAsync(newTrack);
+
+                    await _dbContext.SaveChangesAsync(); // Save track, album, and artwork paths
                     processedCount++;
                 }
                 catch (Exception ex)
@@ -267,7 +275,6 @@ public class MetadataService : IMetadataService
                 }
             }
 
-            await _dbContext.SaveChangesAsync();
             _logger.LogInformation($"Music folder scan complete. Processed: {processedCount}, Skipped: {skippedCount}, Errors: {errorCount}");
         }
         catch (Exception ex)
@@ -294,10 +301,10 @@ public class MetadataService : IMetadataService
             if (album != null)
             {
                 _logger.LogInformation($"Found existing album: {album.Title}");
+                // NOTE: maybe later add logic here to check/update artwork for existing albums if needed
                 return album;
             }
 
-            // _dbContext.Entry(existingCollection).CurrentValues.SetValues(collection);
             _logger.LogInformation($"Creating new album: {track.AlbumTitle}");
             album = new Album
             {
@@ -310,6 +317,7 @@ public class MetadataService : IMetadataService
                 LastModified = DateTime.UtcNow,
             };
             _dbContext.Albums.Add(album);
+            // Artwork is handled in ScanMusicFolderAsync after this returns
             _logger.LogInformation($"Successfully created new album: {album.Title}");
             return album;
         }

@@ -31,10 +31,10 @@ public class Track
     public DateTime LastModified { get; set; } = DateTime.UtcNow;
 
     public string? AlbumTitle { get; set; } = "Unknown Album";
-
+    public string? ArtworkPath { get; set; }
     public int? AlbumId { get; set; } // Foreign key to album 
     public Album? Album { get; set; }
-    public int? TrackNumber {get; set;}
+    public int? TrackNumber { get; set; }
 
     public ICollection<Playlist> Playlists { get; set; } = new List<Playlist>();
     public ICollection<TrackQueue> TrackQueues { get; set; } = new List<TrackQueue>();

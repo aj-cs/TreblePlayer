@@ -61,7 +61,7 @@ public class MusicPlayer : IDisposable
         _logger.LogInformation($"MusicPlayer: Preparing to play track (ID: {track.TrackId})");
         _currentMedia = new Media(_libVlc, new Uri(track.FilePath)); // TODO: switch to FileService later
         _player = new MediaPlayer(_currentMedia);
-        _player.EnableHardwareDecoding = false;
+        // _player.EnableHardwareDecoding = false;
 
         //if (AutoAdvanceEnabled)
         //{
