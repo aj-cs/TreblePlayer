@@ -13,6 +13,10 @@ public class Playlist : ITrackCollection
     public DateTime LastModified { get; set; }
     public TrackCollectionType CollectionType => TrackCollectionType.Playlist;
     public ICollection<Track> Tracks { get; set; } = new List<Track>();
+    public string? ArtworkPath { get; set; }
+    public string? Genre { get; set; }
+
+    //TODO: change Tracks to private
 
     public void AddTrack(Track track)
     {

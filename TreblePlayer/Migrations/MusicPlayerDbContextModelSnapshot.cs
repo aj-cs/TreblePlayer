@@ -56,6 +56,9 @@ namespace TreblePlayer.Migrations
                     b.Property<string>("AlbumArtist")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ArtworkPath")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("DateCreated")
                         .HasColumnType("TEXT");
 
@@ -117,6 +120,9 @@ namespace TreblePlayer.Migrations
 
                     b.Property<string>("Artist")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ArtworkPath")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Bitrate")
