@@ -1,6 +1,7 @@
 using ATL.AudioData;
 using Microsoft.Extensions.Logging;
 using TreblePlayer.Models;
+using System.IO;
 
 namespace TreblePlayer.Services;
 
@@ -12,6 +13,11 @@ public class ArtworkService : IArtworkService
     public ArtworkService(ILoggingService logger)
     {
         _logger = logger;
+        if (!Directory.Exists(_artworkBaseDirectory))
+        {
+            Directory.CreateDirectory(_artworkBaseDirectory);
+            _logger.LogInformation($"Created artwork directory: {_artworkBaseDirectory}");
+        }
     }
 
     private string? FindCoverInFolder(string folderPath)
@@ -153,17 +159,45 @@ public class ArtworkService : IArtworkService
     {
         return Path.Combine(_artworkBaseDirectory, "placeholder.png");
     }
+
+    public string GetDefaultPlaylistArtworkPath()
+    {
+        return Path.Combine(_artworkBaseDirectory, "placeholder2.png");
+    }
+
     private string SaveArtworkToAlbum(string sourceImagePath, Album album)
     {
-        var targetPath = Path.Combine(_artworkBaseDirectory, $"album_{album.Id}.jpg");
+        var extension = Path.GetExtension(sourceImagePath);
+        var targetPath = Path.Combine(_artworkBaseDirectory, $"album_{album.Id}{extension}");
         File.Copy(sourceImagePath, targetPath, overwrite: true);
+        _logger.LogDebug($"Saved artwork for Album {album.Id} to {targetPath}");
         return targetPath;
     }
 
     private string SaveArtworkToTrack(string sourceImagePath, Track track)
     {
-        var targetPath = Path.Combine(_artworkBaseDirectory, $"track{track.TrackId}.jpg");
+        var extension = Path.GetExtension(sourceImagePath);
+        var targetPath = Path.Combine(_artworkBaseDirectory, $"track_{track.TrackId}{extension}");
         File.Copy(sourceImagePath, targetPath, overwrite: true);
+        _logger.LogDebug($"Saved artwork for Track {track.TrackId} to {targetPath}");
         return targetPath;
+    }
+
+    public string SaveArtworkToPlaylist(Playlist playlist, string sourceImagePath, string fileExtension)
+    {
+        if (!fileExtension.StartsWith('.')) fileExtension = "." + fileExtension;
+
+        var targetPath = Path.Combine(_artworkBaseDirectory, $"playlist_{playlist.Id}{fileExtension}");
+        try
+        {
+            File.Copy(sourceImagePath, targetPath, overwrite: true);
+            _logger.LogDebug($"Saved artwork for Playlist {playlist.Id} to {targetPath}");
+            return targetPath;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error saving artwork for Playlist {playlist.Id} from {sourceImagePath} to {targetPath}", ex);
+            throw;
+        }
     }
 }

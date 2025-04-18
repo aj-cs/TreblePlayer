@@ -70,5 +70,10 @@ public class PlaybackHub : Hub
     {
         return (int)await _player.ToggleLoopModeAsync();
     }
+
+    public async Task RequestPlayPlaylist(int playlistId, int startIndex = 0)
+    {
+        await _player.PlayPlaylistAsync(playlistId, startIndex);
+    }
 }
 

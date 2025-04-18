@@ -54,7 +54,7 @@ builder.Services.AddSingleton<MusicPlayer>(sp =>
 
 var app = builder.Build();
 
-// Ensure artwork directory and placeholder exists
+// Ensure artwork directory and placeholders exist
 var artworkBasePath = Path.Combine(AppContext.BaseDirectory, "artwork");
 if (!Directory.Exists(artworkBasePath))
 {
@@ -70,38 +70,43 @@ if (!Directory.Exists(artworkBasePath))
     }
 }
 
-var placeholderPath = Path.Combine(artworkBasePath, "placeholder.png");
-if (!File.Exists(placeholderPath))
+// --- Refactor placeholder check into a helper function ---
+async Task EnsurePlaceholderExists(string placeholderFileName, string resourceName)
 {
-    Console.WriteLine($"Placeholder file not found at {placeholderPath}. Attempting to extract from embedded resources...");
-    var assembly = Assembly.GetExecutingAssembly();
-    // IMPORTANT: Ensure this matches the LogicalName in your .csproj
-    var resourceName = "TreblePlayer.artwork.placeholder.png"; 
-
-    try
+    var placeholderPath = Path.Combine(artworkBasePath, placeholderFileName);
+    if (!File.Exists(placeholderPath))
     {
-        using (Stream? resourceStream = assembly.GetManifestResourceStream(resourceName))
+        Console.WriteLine($"Placeholder '{placeholderFileName}' not found at {placeholderPath}. Attempting to extract from embedded resources...");
+        var assembly = Assembly.GetExecutingAssembly();
+
+        try
         {
-            if (resourceStream == null)
+            using (Stream? resourceStream = assembly.GetManifestResourceStream(resourceName))
             {
-                Console.WriteLine($"Error: Embedded resource '{resourceName}' not found in assembly.");
-            }
-            else
-            {
-                using (var fileStream = new FileStream(placeholderPath, FileMode.Create, FileAccess.Write))
+                if (resourceStream == null)
                 {
-                    await resourceStream.CopyToAsync(fileStream); // Use async version
+                    Console.WriteLine($"Error: Embedded resource '{resourceName}' not found in assembly.");
                 }
-                Console.WriteLine($"Successfully extracted embedded placeholder to: {placeholderPath}");
+                else
+                {
+                    using (var fileStream = new FileStream(placeholderPath, FileMode.Create, FileAccess.Write))
+                    {
+                        await resourceStream.CopyToAsync(fileStream);
+                    }
+                    Console.WriteLine($"Successfully extracted embedded placeholder '{placeholderFileName}' to: {placeholderPath}");
+                }
             }
         }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error extracting embedded resource '{resourceName}': {ex.Message}");
-        // Log the error, the application might still function but without a default image
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error extracting embedded resource '{resourceName}': {ex.Message}");
+        }
     }
 }
+
+// --- Call the helper for both placeholders ---
+await EnsurePlaceholderExists("placeholder.png", "TreblePlayer.artwork.placeholder.png");
+await EnsurePlaceholderExists("placeholder2.png", "TreblePlayer.artwork.placeholder2.png");
 
 using (var scope = app.Services.CreateScope())
 {

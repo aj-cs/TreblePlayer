@@ -91,7 +91,13 @@ namespace TreblePlayer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ArtworkPath")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("DateCreated")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Genre")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("LastModified")

@@ -27,8 +27,8 @@
       <EmbeddedResource Include="artwork\placeholder.png">
         <LogicalName>TreblePlayer.artwork.placeholder.png</LogicalName>
       </EmbeddedResource>
-      <EmbeddedResource Include="artwork\track.png">
-        <LogicalName>TreblePlayer.artwork.track.png</LogicalName>
+      <EmbeddedResource Include="artwork\placeholder2.png">
+        <LogicalName>TreblePlayer.artwork.placeholder2.png</LogicalName>
       </EmbeddedResource>
     </ItemGroup>
 

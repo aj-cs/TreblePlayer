@@ -163,8 +163,8 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             var playlist = await _dbContext.Playlists
-                .Include(a => a.Tracks)
-                .FirstOrDefaultAsync(a => a.Id == playlistId);
+                .Include(p => p.Tracks)
+                .FirstOrDefaultAsync(p => p.Id == playlistId);
 
             if (playlist == null)
             {
@@ -379,6 +379,150 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         catch (Exception ex)
         {
             _logger.LogError($"Error clearing queue {queueId}", ex);
+            throw;
+        }
+    }
+
+    public async Task<List<Playlist>> GetAllPlaylistsAsync()
+    {
+        try
+        {
+            var playlists = await _dbContext.Playlists
+                                        .Include(p => p.Tracks)
+                                        .ToListAsync();
+            _logger.LogInformation($"Retrieved {playlists.Count} playlists");
+            return playlists;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error getting all playlists", ex);
+            throw;
+        }
+    }
+
+    public async Task AddPlaylistAsync(Playlist playlist)
+    {
+        try
+        {
+            if (playlist == null) throw new ArgumentNullException(nameof(playlist));
+
+            _logger.LogInformation($"Adding new playlist: {playlist.Title}");
+            if (playlist.Tracks != null && playlist.Tracks.Any())
+            {
+                var trackIds = playlist.Tracks.Select(t => t.TrackId).ToList();
+                var trackedTracks = await _dbContext.Tracks.Where(t => trackIds.Contains(t.TrackId)).ToListAsync();
+                playlist.Tracks = trackedTracks;
+            }
+            else
+            {
+                playlist.Tracks = new List<Track>();
+            }
+
+            playlist.DateCreated = DateTime.UtcNow;
+            playlist.LastModified = DateTime.UtcNow;
+
+            await _dbContext.Playlists.AddAsync(playlist);
+            await _dbContext.SaveChangesAsync();
+            _logger.LogInformation($"Successfully added playlist: {playlist.Title} (ID: {playlist.Id})");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error adding playlist {playlist?.Title}", ex);
+            throw;
+        }
+    }
+
+    public async Task RemovePlaylistAsync(int playlistId)
+    {
+        try
+        {
+            _logger.LogInformation($"Removing playlist: ID {playlistId}");
+            var playlist = await _dbContext.Playlists.FindAsync(playlistId);
+
+            if (playlist == null)
+            {
+                _logger.LogWarning($"Playlist not found for removal: ID {playlistId}");
+                throw new KeyNotFoundException($"Playlist with ID {playlistId} not found.");
+            }
+
+            _dbContext.Playlists.Remove(playlist);
+            await _dbContext.SaveChangesAsync();
+            _logger.LogInformation($"Successfully removed playlist: {playlist.Title} (ID: {playlistId})");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error removing playlist {playlistId}", ex);
+            throw;
+        }
+    }
+
+    public async Task AddTrackToPlaylistAsync(int playlistId, int trackId)
+    {
+        try
+        {
+            _logger.LogInformation($"Adding track {trackId} to playlist {playlistId}");
+            var playlist = await _dbContext.Playlists
+                                        .Include(p => p.Tracks)
+                                        .FirstOrDefaultAsync(p => p.Id == playlistId);
+            var track = await _dbContext.Tracks.FindAsync(trackId);
+
+            if (playlist == null)
+            {
+                 _logger.LogWarning($"Playlist not found: ID {playlistId}");
+                 throw new KeyNotFoundException($"Playlist with ID {playlistId} not found.");
+            }
+             if (track == null)
+            {
+                 _logger.LogWarning($"Track not found: ID {trackId}");
+                 throw new KeyNotFoundException($"Track with ID {trackId} not found.");
+            }
+
+            if (!playlist.Tracks.Any(t => t.TrackId == trackId))
+            {
+                playlist.AddTrack(track);
+                await _dbContext.SaveChangesAsync();
+                 _logger.LogInformation($"Successfully added track {trackId} to playlist {playlistId}");
+            }
+            else
+            {
+                _logger.LogWarning($"Track {trackId} already exists in playlist {playlistId}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error adding track {trackId} to playlist {playlistId}", ex);
+            throw;
+        }
+    }
+
+    public async Task RemoveTrackFromPlaylistAsync(int playlistId, int trackId)
+    {
+        try
+        {
+            _logger.LogInformation($"Removing track {trackId} from playlist {playlistId}");
+            var playlist = await _dbContext.Playlists
+                                        .Include(p => p.Tracks)
+                                        .FirstOrDefaultAsync(p => p.Id == playlistId);
+            if (playlist == null)
+            {
+                 _logger.LogWarning($"Playlist not found: ID {playlistId}");
+                 throw new KeyNotFoundException($"Playlist with ID {playlistId} not found.");
+            }
+
+            var track = playlist.Tracks.FirstOrDefault(t => t.TrackId == trackId);
+            if (track == null)
+            {
+                _logger.LogWarning($"Track {trackId} not found in playlist {playlistId}");
+                 return;
+            }
+
+            playlist.RemoveTrack(track);
+            await _dbContext.SaveChangesAsync();
+             _logger.LogInformation($"Successfully removed track {trackId} from playlist {playlistId}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error removing track {trackId} from playlist {playlistId}", ex);
             throw;
         }
     }

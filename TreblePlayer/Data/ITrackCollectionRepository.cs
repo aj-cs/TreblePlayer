@@ -19,7 +19,6 @@ public interface ITrackCollectionRepository
     Task RemoveTrackFromQueueAsync(int queueId, int trackId);
     Task ClearQueueAsync(int queueId);
 
-    Task<Playlist> GetPlaylistByIdAsync(int playlistId);
 
     Task<List<ITrackCollection>> GetCollectionsByTitleAsync(string title);
     Task<List<ITrackCollection>> GetCollectionsByTrackAsync(int trackId);
@@ -28,5 +27,14 @@ public interface ITrackCollectionRepository
     Task UpdateCollectionAsync(ITrackCollection collection);
 
     // Task SaveChangesAsync();
+
+    Task<string> GetCollectionTitleByIdAsync(int collectionId, TrackCollectionType type);
+
+    Task<Playlist?> GetPlaylistByIdAsync(int playlistId);
+    Task<List<Playlist>> GetAllPlaylistsAsync();
+    Task AddPlaylistAsync(Playlist playlist);
+    Task RemovePlaylistAsync(int playlistId);
+    Task AddTrackToPlaylistAsync(int playlistId, int trackId);
+    Task RemoveTrackFromPlaylistAsync(int playlistId, int trackId);
 }
 

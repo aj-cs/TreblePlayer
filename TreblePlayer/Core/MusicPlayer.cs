@@ -158,30 +158,13 @@ public class MusicPlayer : IDisposable
         using var scope = _scopeFactory.CreateScope();
         var collectionRepo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
         var collection = await collectionRepo.GetTrackCollectionByIdAsync(collectionId, type);
-        if (collection == null || collection.Tracks.Count == 0)
+        if (collection == null || !collection.Tracks.Any()) // Use Any() for efficiency
         {
-            _logger.LogWarning("No tracks in the collection to play.");
+            _logger.LogWarning($"Collection {collectionId} of type {type} not found or is empty.");
             return;
         }
 
-        if (startIndex < 0 || startIndex >= collection.Tracks.Count)
-        {
-            _logger.LogWarning("Invalid start index.");
-            return;
-        }
-        //skip to the start index
-        var tracks = collection.Tracks.OrderBy(t => t.TrackNumber).ToList(); // Sort initially by track number
-
-        // the ShuffleEnabled flag here determines the initial state if creating a new queue
-        // but the persisted IsShuffleEnabled on the queue takes precedence when loading
-        if (ShuffleEnabled)
-        {
-            tracks = tracks.OrderBy(_ => Guid.NewGuid()).ToList();
-        }
-
-        _logger.LogWarning("Calling CreateNowPlayingQueueAsync from PlayCollectionAsync");
-        var queueId = await CreateNowPlayingQueueAsync(tracks, $"Now playing: {collection.Title}");
-        await LoadQueueAndPlayAsync(queueId, startIndex);
+        await StartPlaybackFromCollection(collection, startIndex);
     }
     /// <summary>
     /// pauses playback if a track is playing
@@ -618,6 +601,45 @@ public class MusicPlayer : IDisposable
         }
         return LoopTrack.None;
     }
+
+    public async Task PlayPlaylistAsync(int playlistId, int startIndex = 0)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var collectionRepo = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
+        var playlist = await collectionRepo.GetPlaylistByIdAsync(playlistId); // Use specific method
+
+        if (playlist == null || !playlist.Tracks.Any())
+        {
+            _logger.LogWarning($"Playlist {playlistId} not found or is empty.");
+            return;
+        }
+
+        await StartPlaybackFromCollection(playlist, startIndex);
+    }
+
+    private async Task StartPlaybackFromCollection(ITrackCollection collection, int startIndex = 0)
+    {
+         if (startIndex < 0 || startIndex >= collection.Tracks.Count)
+        {
+            _logger.LogWarning($"Invalid start index {startIndex} for collection {collection.Id} with {collection.Tracks.Count} tracks.");
+            startIndex = 0; // Default to 0 if invalid
+        }
+
+        // Order tracks - Assuming playlists don't have inherent order like albums (TrackNumber)
+        // If you add ordering to playlists later, adjust this.
+        var tracks = collection.Tracks.ToList();
+
+        // Shuffle if needed (based on player state, not collection state)
+        if (ShuffleEnabled)
+        {
+            tracks = tracks.OrderBy(_ => Guid.NewGuid()).ToList();
+        }
+
+        _logger.LogInformation($"Creating 'Now Playing' queue from collection: {collection.Title} (ID: {collection.Id}, Type: {collection.CollectionType})");
+        var queueId = await CreateNowPlayingQueueAsync(tracks, $"Now playing: {collection.Title}");
+        await LoadQueueAndPlayAsync(queueId, startIndex);
+    }
+
     public void Dispose()
     {
         Stop();

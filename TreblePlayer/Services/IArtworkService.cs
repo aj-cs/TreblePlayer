@@ -32,5 +32,25 @@ public interface IArtworkService
     /// <returns>The file path to the selected or generated artwork. </returns>
     Task<string> SetAlbumArtworkAsync(Album album);
     Task<string> SetTrackArtworkAsync(Track track);
+
+    /// <summary>
+    /// Gets the path to the default fallback artwork image (e.g., for tracks/albums).
+    /// </summary>
+    /// <returns>The file path to the default placeholder image.</returns>
     string GetDefaultArtworkPath();
+
+    /// <summary>
+    /// Gets the path to the default fallback artwork image specifically for playlists.
+    /// </summary>
+    /// <returns>The file path to the playlist-specific placeholder image.</returns>
+    string GetDefaultPlaylistArtworkPath();
+
+    /// <summary>
+    /// Saves the provided image file as the artwork for the specified playlist.
+    /// </summary>
+    /// <param name="playlist">The playlist to save artwork for.</param>
+    /// <param name="sourceImagePath">The path to the source image file to copy.</param>
+    /// <param name="fileExtension">The extension of the source file (e.g., ".jpg", ".png").</param>
+    /// <returns>The path where the artwork was saved.</returns>
+    string SaveArtworkToPlaylist(Playlist playlist, string sourceImagePath, string fileExtension);
 }
