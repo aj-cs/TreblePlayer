@@ -44,6 +44,11 @@ public class TrackRepository : ITrackRepository
 
     public async Task RemoveTracksFromDb(ICollection<Track> tracks)
     {
+        if (tracks == null || !tracks.Any())
+        {
+            _logger.LogWarning("Attempted to remove an empty collection of tracks.");
+            return;
+        }
         try
         {
             _logger.LogInformation($"Removing {tracks.Count} tracks from database");
@@ -58,46 +63,62 @@ public class TrackRepository : ITrackRepository
         }
     }
 
-    public async Task AddOrUpdateTrackAsync(Track track)
+    public async Task<Track?> GetTrackByFilePathAsync(string filePath)
     {
+        if (string.IsNullOrEmpty(filePath))
+            return null;
+
+        return await _dbContext.Tracks
+            .FirstOrDefaultAsync(t => t.FilePath != null && t.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public async Task<bool> AddOrUpdateTrackAsync(Track track)
+    {
+        if (track == null)
+        {
+            _logger.LogWarning("Attempted to add or update a null track.");
+            return false;
+        }
+
         try
         {
-            var existingTrack = await _dbContext.Tracks
-                .FirstOrDefaultAsync(t => t.TrackId == track.TrackId);
+            var existingTrack = await GetTrackByFilePathAsync(track.FilePath);
 
             if (existingTrack == null)
             {
-                _logger.LogInformation($"Adding new track: {track.Title} (ID: {track.TrackId})");
-                await _dbContext.Tracks.AddAsync(track);
+                if (existingTrack == null)
+                {
+                    _logger.LogInformation($"Adding new track: {track.Title} (Path: {track.FilePath})");
+                    await _dbContext.Tracks.AddAsync(track);
+                    await _dbContext.SaveChangesAsync();
+                    return true;
+                }
+            }
+
+            bool needsUpdate = false;
+            if (existingTrack.Title != track.Title) { existingTrack.Title = track.Title; needsUpdate = true; }
+            if (existingTrack.AlbumId != track.AlbumId) { existingTrack.AlbumId = track.AlbumId; needsUpdate = true; }
+            if (existingTrack.Artist != track.Artist) { existingTrack.Artist = track.Artist; needsUpdate = true; }
+            if (existingTrack.Duration != track.Duration) { existingTrack.Duration = track.Duration; needsUpdate = true; }
+            if (existingTrack.TrackNumber != track.TrackNumber) { existingTrack.TrackNumber = track.TrackNumber; needsUpdate = true; }
+            if (existingTrack.FilePath != track.FilePath) { existingTrack.FilePath = track.FilePath; needsUpdate = true; }
+
+            if (needsUpdate)
+            {
+                _logger.LogInformation($"Updating existing track: {track.Title} (Path: {track.FilePath})");
+                await _dbContext.SaveChangesAsync();
+                return true;
             }
             else
             {
-                _logger.LogInformation($"Updating track: {track.Title} (ID: {track.TrackId})");
-                existingTrack.Title = track.Title;
-                existingTrack.AlbumId = track.AlbumId;
-                existingTrack.Artist = track.Artist;
-                existingTrack.Duration = track.Duration;
+                _logger.LogInformation($"No significant changes detected for track: {track.Title} (Path: {track.FilePath})");
+                return false;
             }
-            await _dbContext.SaveChangesAsync();
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error adding/updating track {track.TrackId}", ex);
-            throw;
-        }
-    }
-
-    public async Task SaveChangesAsync()
-    {
-        try
-        {
-            await _dbContext.SaveChangesAsync();
-            _logger.LogDebug("Database changes saved successfully");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError("Error saving database changes", ex);
-            throw;
+            _logger.LogError($"Error adding/updating track with path {track.FilePath}: {ex.Message}", ex);
+            return false;
         }
     }
 
@@ -117,16 +138,22 @@ public class TrackRepository : ITrackRepository
 
     public async Task<IEnumerable<Track>> GetTracksByPlaylistIdAsync(int playlistId)
     {
-        var tracks = await _dbContext.Playlists
-            .Where(t => t.Id == playlistId)
-            .SelectMany(p => p.Tracks)
+        var playlist = await _dbContext.Playlists
+            .Include(p => p.Tracks)
+            .FirstOrDefaultAsync(p => p.Id == playlistId);
+
+        return playlist?.Tracks ?? Enumerable.Empty<Track>();
+    }
+
+    public async Task<IEnumerable<Track>> GetAllTracksAsync()
+    {
+        var tracks = await _dbContext.Tracks
             .ToListAsync();
 
         if (!tracks.Any())
         {
-            _logger.LogWarning($"No tracks found for playlist ID: {playlistId}");
+            _logger.LogWarning($"No tracks found.");
         }
-
         return tracks;
     }
 }

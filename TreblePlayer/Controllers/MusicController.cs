@@ -10,6 +10,9 @@ using TreblePlayer.Services;
 //using TreblePlayer.DTOs;
 namespace TreblePlayer.Controllers;
 
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
 
 [ApiController]
 [Route("api/[controller]")]
@@ -20,17 +23,20 @@ public class MusicController : ControllerBase
     private readonly ITrackRepository _trackRepository;
     private readonly ITrackCollectionRepository _collectionRepository;
     private readonly ILoggingService _logger;
+    private readonly IHubContext<DataHub> _dataHubContext;
 
     public MusicController(
         MusicPlayer musicPlayer,
         ITrackRepository trackRepository,
         ITrackCollectionRepository collectionRepository,
-        ILoggingService logger)
+        ILoggingService logger,
+        IHubContext<DataHub> dataHubContext)
     {
         _player = musicPlayer;
         _trackRepository = trackRepository;
         _collectionRepository = collectionRepository;
         _logger = logger;
+        _dataHubContext = dataHubContext;
     }
 
     [HttpPost("play/{trackId}")]
@@ -265,13 +271,13 @@ public class MusicController : ControllerBase
         }
         catch (Exception ex)
         {
-             _logger.LogError("Error getting all playlists", ex);
+            _logger.LogError("Error getting all playlists", ex);
             return StatusCode(500, new { message = "Failed to retrieve playlists." });
         }
     }
 
     [HttpGet("playlist/{playlistId}")]
-     public async Task<IActionResult> GetPlaylistById(int playlistId)
+    public async Task<IActionResult> GetPlaylistById(int playlistId)
     {
         try
         {
@@ -280,47 +286,93 @@ public class MusicController : ControllerBase
             {
                 return NotFound(new { message = $"Playlist with ID {playlistId} not found." });
             }
-             // Consider mapping to DTOs
+            // Consider mapping to DTOs
             return Ok(playlist);
         }
         catch (Exception ex)
         {
-             _logger.LogError($"Error getting playlist {playlistId}", ex);
+            _logger.LogError($"Error getting playlist {playlistId}", ex);
             return StatusCode(500, new { message = "Failed to retrieve playlist details." });
         }
     }
 
 
     [HttpPost("playlist/create")]
-    public async Task<IActionResult> CreatePlaylist([FromBody] PlaylistCreateModel model) // Use a DTO for input
+    public async Task<IActionResult> CreatePlaylist([FromBody] PlaylistCreateWithItemsModel model) // Use new DTO
     {
         if (model == null || string.IsNullOrWhiteSpace(model.Title))
         {
             return BadRequest(new { message = "Playlist title cannot be empty." });
         }
+        // Basic validation for TrackIds if needed
+        // if (model.TrackIds == null || !model.TrackIds.Any())
+        // {
+        //     return BadRequest(new { message = "Playlist must contain at least one track." });
+        // }
+
         try
         {
-            var newPlaylist = new Playlist { Title = model.Title }; // Map from DTO
+            // 1. Create the playlist entry
+            var newPlaylist = new Playlist { Title = model.Title };
             await _collectionRepository.AddPlaylistAsync(newPlaylist);
-            // Return the created playlist, potentially mapped to a DTO
-            return CreatedAtAction(nameof(GetPlaylistById), new { playlistId = newPlaylist.Id }, newPlaylist);
+
+            // 2. Add tracks to the newly created playlist
+            // Need to handle potential errors during track addition
+            List<string> trackAddErrors = new List<string>();
+            if (model.TrackIds != null && model.TrackIds.Any())
+            {
+                foreach (var trackId in model.TrackIds)
+                {
+                    try
+                    {
+                        await _collectionRepository.AddTrackToPlaylistAsync(newPlaylist.Id, trackId);
+                    }
+                    catch (KeyNotFoundException ex) // Catch if specific track not found
+                    {
+                        _logger.LogWarning($"Error adding track {trackId} to playlist {newPlaylist.Id}: {ex.Message}");
+                        trackAddErrors.Add($"Track ID {trackId} not found or could not be added.");
+                    }
+                    catch (Exception ex) // Catch other potential errors
+                    {
+                        _logger.LogError($"Error adding track {trackId} to playlist {newPlaylist.Id}", ex);
+                        trackAddErrors.Add($"Failed to add track ID {trackId}.");
+                    }
+                }
+            }
+
+            // Return the created playlist (even if some tracks failed to add)
+            // Include track addition errors in the response if any occurred
+            var responsePayload = new
+            {
+                playlist = newPlaylist, // Consider mapping to a DTO
+                trackAdditionErrors = trackAddErrors.Any() ? trackAddErrors : null
+            };
+
+            // <<< Send notification after successful creation >>>
+            await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated");
+
+            return CreatedAtAction(nameof(GetPlaylistById), new { playlistId = newPlaylist.Id }, responsePayload);
         }
         catch (Exception ex)
         {
-             _logger.LogError($"Error creating playlist with title '{model.Title}'", ex);
+            _logger.LogError($"Error creating playlist with title '{model.Title}'", ex);
             return StatusCode(500, new { message = "Failed to create playlist." });
         }
     }
 
-     [HttpDelete("playlist/{playlistId}")]
+    [HttpDelete("playlist/{playlistId}")]
     public async Task<IActionResult> DeletePlaylist(int playlistId)
     {
         try
         {
             await _collectionRepository.RemovePlaylistAsync(playlistId);
+            
+            // <<< Send notification after successful deletion >>>
+            await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated");
+            
             return NoContent(); // Standard response for successful deletion
         }
-         catch (KeyNotFoundException)
+        catch (KeyNotFoundException)
         {
             return NotFound(new { message = $"Playlist with ID {playlistId} not found." });
         }
@@ -331,12 +383,16 @@ public class MusicController : ControllerBase
         }
     }
 
-     [HttpPost("playlist/{playlistId}/addTrack/{trackId}")]
+    [HttpPost("playlist/{playlistId}/addTrack/{trackId}")]
     public async Task<IActionResult> AddTrackToPlaylist(int playlistId, int trackId)
     {
         try
         {
             await _collectionRepository.AddTrackToPlaylistAsync(playlistId, trackId);
+
+            // <<< Send notification after successful add >>>
+            await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated"); // Or maybe a more specific "PlaylistContentUpdated", playlistId ?
+
             return Ok(new { message = $"Track {trackId} added to playlist {playlistId}." });
         }
         catch (KeyNotFoundException ex)
@@ -346,22 +402,26 @@ public class MusicController : ControllerBase
         }
         catch (Exception ex)
         {
-             _logger.LogError($"Error adding track {trackId} to playlist {playlistId}", ex);
+            _logger.LogError($"Error adding track {trackId} to playlist {playlistId}", ex);
             return StatusCode(500, new { message = "Failed to add track to playlist." });
         }
     }
 
-     [HttpDelete("playlist/{playlistId}/removeTrack/{trackId}")]
+    [HttpDelete("playlist/{playlistId}/removeTrack/{trackId}")]
     public async Task<IActionResult> RemoveTrackFromPlaylist(int playlistId, int trackId)
     {
         try
         {
             await _collectionRepository.RemoveTrackFromPlaylistAsync(playlistId, trackId);
+
+            // <<< Send notification after successful removal >>>
+            await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated"); // Or maybe a more specific "PlaylistContentUpdated", playlistId ?
+
             return Ok(new { message = $"Track {trackId} removed from playlist {playlistId}." });
         }
         catch (KeyNotFoundException ex)
         {
-             // Handle case where playlist doesn't exist (repo throws)
+            // Handle case where playlist doesn't exist (repo throws)
             return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
@@ -370,12 +430,135 @@ public class MusicController : ControllerBase
             return StatusCode(500, new { message = "Failed to remove track from playlist." });
         }
     }
+    // --- Add Methods for Getting Library Data ---
 
-    // --- Placeholder for DTO ---
-    // You should create this in a DTOs folder or similar
-    public class PlaylistCreateModel
+    [HttpGet("albums")]
+    public async Task<IActionResult> GetAllAlbums()
     {
-        public string Title { get; set; } = string.Empty;
-        // Add other properties if needed for playlist creation
+        try
+        {
+            var albumsFromRepo = await _collectionRepository.GetAllAlbumsAsync();
+            if (albumsFromRepo == null)
+            {
+                return Ok(new List<object>());
+            }
+
+            var albumsForFrontend = new List<AlbumDto>(); // Initialize list to store results
+
+            foreach (var album in albumsFromRepo)
+            {
+                // Construct artwork URL using the actual AlbumId
+                string artworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{album.Id}";
+
+                // Fetch tracks associated with this album asynchronously
+                var tracksForAlbum = await _trackRepository.GetTracksByAlbumIdAsync(album.Id);
+
+                // Calculate track count safely
+                int trackCount = tracksForAlbum?.Count() ?? 0;
+
+                // Correctly handle potential null tracksForAlbum before mapping
+                var tracksDto = new List<TrackDto>(); // Default to empty list
+                if (tracksForAlbum != null)
+                {
+                    tracksDto = tracksForAlbum
+                       .Select(t => new TrackDto
+                       {
+                           Id = t.TrackId,
+                           Number = t.TrackNumber,
+                           Title = t.Title,
+                           Duration = t.Duration
+                       })
+                       .OrderBy(t => t.Number)
+                       .ToList();
+                }
+
+                // Add the mapped album to the results list
+                albumsForFrontend.Add(new AlbumDto
+                {
+                    Id = album.Id,
+                    Title = album.Title,
+                    Artist = album.AlbumArtist,
+                    ArtworkUrl = artworkUrl,
+                    TrackCount = trackCount,
+                    Tracks = tracksDto // Assign the correctly typed list
+                });
+            }
+
+            // Sort the final list
+            var sortedAlbums = albumsForFrontend
+                 .OrderBy(a => a.Artist) // Sort by artist
+                 .ThenBy(a => a.Title) // Then by title
+                 .ToList();
+
+            return Ok(sortedAlbums);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error getting all albums", ex);
+            return StatusCode(500, "An error occurred while retrieving albums.");
+        }
     }
+
+
+    [HttpGet("tracks")]
+    public async Task<IActionResult> GetAllTracks()
+    {
+        try
+        {
+            var tracks = await _trackRepository.GetAllTracksAsync();
+            return Ok(tracks ?? new List<Track>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error getting all tracks", ex);
+            return StatusCode(500, "An error occurred while retrieving tracks.");
+        }
+    }
+
+} // End of MusicController Class
+
+// --- DTOs for Playlist Creation ---
+// Define DTO used in CreatePlaylist above
+// Consider moving this to a separate DTOs folder/namespace
+public class PlaylistCreateWithItemsModel
+{
+    public string Title { get; set; } = string.Empty;
+    public List<int> TrackIds { get; set; } = new List<int>();
+}
+
+// Keep original model if used elsewhere, or remove if only the new one is needed by API
+// public class PlaylistCreateModel
+// {
+//    public string Title { get; set; } = string.Empty;
+// }
+
+// Ensure your Track model (in TreblePlayer.Models) has properties like:
+// int TrackId { get; set; }
+// string Title { get; set; }
+// string Artist { get; set; }
+// string AlbumTitle { get; set; }
+// int? TrackNumber { get; set; } // Added assumption
+// string DurationString { get; set; } // Added assumption for formatted duration
+
+// Your Playlist model should have at least:
+// int Id { get; set; }
+// string Title { get; set; }
+// ICollection<Track> Tracks { get; set; } // Or similar relationship
+
+public class AlbumDto
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Artist { get; set; } = string.Empty;
+    public string ArtworkUrl { get; set; } = string.Empty;
+    public int TrackCount { get; set; }
+    public List<TrackDto> Tracks { get; set; } = new List<TrackDto>();
+}
+
+public class TrackDto
+{
+    public int Id { get; set; }
+    public int? Number { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public int Duration { get; set; }
 }

@@ -52,6 +52,14 @@ builder.Services.AddSingleton<MusicPlayer>(sp =>
     return new MusicPlayer(scopeFactory, hubContext, logger);
 });
 
+// Register OrphanedDataCleanupService as both a Singleton (for controller injection) and a Hosted Service
+// This allows it to be injected into controllers while still functioning as a background service
+builder.Services.AddSingleton<OrphanedDataCleanupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<OrphanedDataCleanupService>());
+
+// Register other hosted services
+builder.Services.AddHostedService<FolderMonitoringService>();
+
 var app = builder.Build();
 
 // Ensure artwork directory and placeholders exist
@@ -108,12 +116,10 @@ async Task EnsurePlaceholderExists(string placeholderFileName, string resourceNa
 await EnsurePlaceholderExists("placeholder.png", "TreblePlayer.artwork.placeholder.png");
 await EnsurePlaceholderExists("placeholder2.png", "TreblePlayer.artwork.placeholder2.png");
 
-using (var scope = app.Services.CreateScope())
-{
-    var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
-    string folderPath = Path.Combine(Directory.GetCurrentDirectory(), "music");
-    await metadataService.ScanMusicFolderAsync(folderPath);
-}
+// --- The FolderMonitoringService will automatically scan all monitored folders on startup ---
+// --- This is handled in the StartAsync method of the FolderMonitoringService class ---
+// --- No additional startup code is needed here as the service is designed to do this automatically ---
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -131,4 +137,5 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<PlaybackHub>("/treblehub");
+app.MapHub<DataHub>("/datahub");
 app.Run();

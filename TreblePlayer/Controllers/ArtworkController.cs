@@ -30,7 +30,7 @@ public class ArtworkController : ControllerBase
         _artworkService = artworkService;
         _logger = logger;
 
-         // Ensure temp directory exists
+        // Ensure temp directory exists
         if (!Directory.Exists(_tempUploadPath))
         {
             Directory.CreateDirectory(_tempUploadPath);
@@ -45,7 +45,7 @@ public class ArtworkController : ControllerBase
             var track = await _trackRepository.GetTrackByIdAsync(trackId);
             if (track == null)
             {
-                 _logger.LogWarning($"Track artwork requested but track not found: ID {trackId}");
+                _logger.LogWarning($"Track artwork requested but track not found: ID {trackId}");
                 return await GetDefaultArtwork();
             }
 
@@ -65,18 +65,18 @@ public class ArtworkController : ControllerBase
     {
         try
         {
-             var album = await _collectionRepository.GetAlbumByIdAsync(albumId);
-            string artworkPath; 
+            var album = await _collectionRepository.GetAlbumByIdAsync(albumId);
+            string artworkPath;
             if (album != null && !string.IsNullOrEmpty(album.ArtworkPath) && System.IO.File.Exists(album.ArtworkPath))
             {
                 artworkPath = album.ArtworkPath;
             }
             else
             {
-                 _logger.LogWarning($"Album artwork requested but album or its artwork not found: ID {albumId}");
+                _logger.LogWarning($"Album artwork requested but album or its artwork not found: ID {albumId}");
                 artworkPath = _artworkService.GetDefaultArtworkPath();
             }
-            
+
             return await GetArtworkFile(artworkPath);
         }
         catch (Exception ex)
@@ -92,12 +92,12 @@ public class ArtworkController : ControllerBase
         try
         {
             var playlist = await _collectionRepository.GetPlaylistByIdAsync(playlistId);
-            string artworkPath; 
+            string artworkPath;
             string specificDefault = _artworkService.GetDefaultPlaylistArtworkPath();
 
             if (playlist != null && !string.IsNullOrEmpty(playlist.ArtworkPath) && System.IO.File.Exists(playlist.ArtworkPath))
             {
-                 artworkPath = playlist.ArtworkPath; 
+                artworkPath = playlist.ArtworkPath;
             }
             else
             {
@@ -109,7 +109,7 @@ public class ArtworkController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError($"Error getting playlist artwork for ID {playlistId}", ex);
-             return await GetArtworkFile(_artworkService.GetDefaultPlaylistArtworkPath(), _artworkService.GetDefaultPlaylistArtworkPath());
+            return await GetArtworkFile(_artworkService.GetDefaultPlaylistArtworkPath(), _artworkService.GetDefaultPlaylistArtworkPath());
         }
     }
 
@@ -148,7 +148,7 @@ public class ArtworkController : ControllerBase
             {
                 await file.CopyToAsync(stream);
             }
-             _logger.LogDebug($"Temporarily saved uploaded file for playlist {playlistId} to {tempFilePath}");
+            _logger.LogDebug($"Temporarily saved uploaded file for playlist {playlistId} to {tempFilePath}");
 
 
             // Use ArtworkService to copy to final location and get the path
@@ -162,8 +162,8 @@ public class ArtworkController : ControllerBase
             // Clean up temporary file
             if (System.IO.File.Exists(tempFilePath))
             {
-                 System.IO.File.Delete(tempFilePath);
-                 _logger.LogDebug($"Deleted temporary file {tempFilePath}");
+                System.IO.File.Delete(tempFilePath);
+                _logger.LogDebug($"Deleted temporary file {tempFilePath}");
             }
 
             return Ok(new { message = "Playlist artwork updated successfully.", artworkPath = finalArtworkPath });
@@ -171,7 +171,7 @@ public class ArtworkController : ControllerBase
         }
         catch (Exception ex)
         {
-             _logger.LogError($"Error uploading artwork for playlist {playlistId}", ex);
+            _logger.LogError($"Error uploading artwork for playlist {playlistId}", ex);
             return StatusCode(500, new { message = "An error occurred while uploading the artwork." });
         }
     }
@@ -185,8 +185,8 @@ public class ArtworkController : ControllerBase
 
             if (string.IsNullOrEmpty(filePath) || !System.IO.File.Exists(filePath))
             {
-                 _logger.LogError($"Default artwork placeholder not found at: {filePath}");
-                 return NotFound("Artwork not found, and default placeholder is missing.");
+                _logger.LogError($"Default artwork placeholder not found at: {filePath}");
+                return NotFound("Artwork not found, and default placeholder is missing.");
             }
         }
 
@@ -194,14 +194,20 @@ public class ArtworkController : ControllerBase
         {
             byte[] fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
             string contentType = GetContentType(filePath);
+
+            // Add caching headers to prevent browser caching issues
+            Response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate");
+            Response.Headers.Add("Pragma", "no-cache");
+            Response.Headers.Add("Expires", "0");
+
             return File(fileBytes, contentType);
         }
         catch (FileNotFoundException)
         {
-             _logger.LogError($"Artwork file specifically not found during stream creation: {filePath}");
-             return await GetArtworkFile(defaultPath, defaultPath);
+            _logger.LogError($"Artwork file specifically not found during stream creation: {filePath}");
+            return await GetArtworkFile(defaultPath, defaultPath);
         }
-         catch (Exception ex)
+        catch (Exception ex)
         {
             _logger.LogError($"Error reading artwork file: {filePath}", ex);
             return await GetArtworkFile(defaultPath, defaultPath);
@@ -226,8 +232,11 @@ public class ArtworkController : ControllerBase
             ".jpg" => "image/jpeg",
             ".jpeg" => "image/jpeg",
             ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".webp" => "image/webp",
             // Add other types if needed
             _ => "application/octet-stream", // Default MIME type
         };
     }
-} 
+}

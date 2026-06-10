@@ -12,6 +12,7 @@ public interface ITrackCollectionRepository
     Task<ITrackCollection> GetTrackCollectionByIdAsync(int collectionId, TrackCollectionType collectionType); // returns collection with tracks list loaded in memory
 
     Task<Album> GetAlbumByIdAsync(int albumId);
+    Task<List<Album>> GetAllAlbumsAsync();
 
     Task<TrackQueue> GetQueueByIdAsync(int queueId);
     Task AddQueueAsync(TrackQueue newQueue);
@@ -36,5 +37,8 @@ public interface ITrackCollectionRepository
     Task RemovePlaylistAsync(int playlistId);
     Task AddTrackToPlaylistAsync(int playlistId, int trackId);
     Task RemoveTrackFromPlaylistAsync(int playlistId, int trackId);
+
+    // Add cleanup method signature
+    Task CleanupEmptyCollectionsAsync();
 }
 

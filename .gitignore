@@ -1,5 +1,8 @@
 bin/
 obj/
+music/
+runtimes/
 /packages/
 riderModule.iml
+musicplayer.db
 /_ReSharper.Caches/

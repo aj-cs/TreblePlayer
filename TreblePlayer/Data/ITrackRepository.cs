@@ -8,5 +8,7 @@ public interface ITrackRepository
     Task RemoveTracksFromDb(ICollection<Track> tracks);
     Task<IEnumerable<Track>> GetTracksByAlbumIdAsync(int albumId);
     Task<IEnumerable<Track>> GetTracksByPlaylistIdAsync(int playlistId);
-    Task AddOrUpdateTrackAsync(Track track);
+    Task<bool> AddOrUpdateTrackAsync(Track track);
+    Task<IEnumerable<Track>> GetAllTracksAsync();
+    Task<Track?> GetTrackByFilePathAsync(string filePath);
 }

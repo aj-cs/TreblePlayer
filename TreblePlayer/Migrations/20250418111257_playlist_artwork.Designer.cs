@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TreblePlayer.Data;
 
@@ -10,9 +11,11 @@ using TreblePlayer.Data;
 namespace TreblePlayer.Migrations
 {
     [DbContext(typeof(MusicPlayerDbContext))]
-    partial class MusicPlayerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250418111257_playlist_artwork")]
+    partial class playlist_artwork
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.10");
@@ -83,27 +86,6 @@ namespace TreblePlayer.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Albums");
-                });
-
-            modelBuilder.Entity("TreblePlayer.Models.MonitoredFolder", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("DateAdded")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Path")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Path")
-                        .IsUnique();
-
-                    b.ToTable("MonitoredFolders");
                 });
 
             modelBuilder.Entity("TreblePlayer.Models.Playlist", b =>
@@ -264,8 +246,7 @@ namespace TreblePlayer.Migrations
                 {
                     b.HasOne("TreblePlayer.Models.Album", "Album")
                         .WithMany("Tracks")
-                        .HasForeignKey("AlbumId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .HasForeignKey("AlbumId");
 
                     b.Navigation("Album");
                 });

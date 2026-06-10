@@ -9,6 +9,7 @@ public class MusicPlayerDbContext : DbContext
     public DbSet<Album> Albums { get; set; }
     public DbSet<Playlist> Playlists { get; set; }
     public DbSet<TrackQueue> TrackQueues { get; set; }
+    public DbSet<MonitoredFolder> MonitoredFolders { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -64,6 +65,19 @@ public class MusicPlayerDbContext : DbContext
         modelBuilder.Entity<TrackQueue>()
            .Property(q => q.ShuffledTrackIds)
            .HasColumnType("TEXT");
+
+        // Optional: Configure index on MonitoredFolder.Path for faster lookups?
+        modelBuilder.Entity<MonitoredFolder>()
+            .HasIndex(mf => mf.Path)
+            .IsUnique(); // Ensure paths are unique
+
+        // Fluent API configurations if needed (e.g., cascade delete)
+        modelBuilder.Entity<Album>()
+            .HasMany(a => a.Tracks)
+            .WithOne(t => t.Album) // Assuming Track has Album navigation property
+            .HasForeignKey(t => t.AlbumId) // Assuming Track has AlbumId foreign key
+            .OnDelete(DeleteBehavior.Cascade); // Or SetNull / Restrict depending on desired behavior
+
         base.OnModelCreating(modelBuilder); //idk if this is necessary
     }
 }

@@ -96,7 +96,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
             var albums = await _dbContext.Albums.Where(a => a.Title.Contains(title)).ToListAsync();
             var playlists = await _dbContext.Playlists.Where(a => a.Title.Contains(title)).ToListAsync();
             var queues = await _dbContext.TrackQueues.Where(a => a.Title.Contains(title)).ToListAsync();
-            
+
             var results = albums.Cast<ITrackCollection>()
                 .Concat(playlists.Cast<ITrackCollection>())
                 .Concat(queues.Cast<ITrackCollection>())
@@ -120,7 +120,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
             var albums = await _dbContext.Albums.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync();
             var playlists = await _dbContext.Playlists.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync();
             var queues = await _dbContext.TrackQueues.Where(a => a.Tracks.Any(t => t.TrackId == trackId)).ToListAsync();
-            
+
             var results = albums.Cast<ITrackCollection>()
                 .Concat(playlists.Cast<ITrackCollection>())
                 .Concat(queues.Cast<ITrackCollection>())
@@ -185,7 +185,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             _logger.LogInformation($"Removing collection: {collection.Title} (ID: {collection.Id})");
-            
+
             if (collection is Album album)
             {
                 _dbContext.Albums.Remove(album);
@@ -287,7 +287,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
             var queues = await _dbContext.TrackQueues
                 .Include(q => q.Tracks)
                 .ToListAsync();
-            
+
             _logger.LogInformation($"Retrieved {queues.Count} queues");
             return queues;
         }
@@ -303,7 +303,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             _logger.LogInformation($"Adding new queue: {queue.Title}");
-            
+
             var trackIds = queue.Tracks.Select(t => t.TrackId).ToList();
             var trackedTracks = await _dbContext.Tracks
                 .Where(t => trackIds.Contains(t.TrackId))
@@ -327,11 +327,11 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             _logger.LogInformation($"Removing track {trackId} from queue {queueId}");
-            
+
             var queue = await _dbContext.TrackQueues
                 .Include(q => q.Tracks)
                 .FirstOrDefaultAsync(q => q.Id == queueId);
-                
+
             if (queue == null)
             {
                 _logger.LogWarning($"Queue not found: ID {queueId}");
@@ -361,11 +361,11 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             _logger.LogInformation($"Clearing queue: ID {queueId}");
-            
+
             var queue = await _dbContext.TrackQueues
                 .Include(q => q.Tracks)
                 .FirstOrDefaultAsync(q => q.Id == queueId);
-                
+
             if (queue == null)
             {
                 _logger.LogWarning($"Queue not found: ID {queueId}");
@@ -468,20 +468,20 @@ public class TrackCollectionRepository : ITrackCollectionRepository
 
             if (playlist == null)
             {
-                 _logger.LogWarning($"Playlist not found: ID {playlistId}");
-                 throw new KeyNotFoundException($"Playlist with ID {playlistId} not found.");
+                _logger.LogWarning($"Playlist not found: ID {playlistId}");
+                throw new KeyNotFoundException($"Playlist with ID {playlistId} not found.");
             }
-             if (track == null)
+            if (track == null)
             {
-                 _logger.LogWarning($"Track not found: ID {trackId}");
-                 throw new KeyNotFoundException($"Track with ID {trackId} not found.");
+                _logger.LogWarning($"Track not found: ID {trackId}");
+                throw new KeyNotFoundException($"Track with ID {trackId} not found.");
             }
 
             if (!playlist.Tracks.Any(t => t.TrackId == trackId))
             {
                 playlist.AddTrack(track);
                 await _dbContext.SaveChangesAsync();
-                 _logger.LogInformation($"Successfully added track {trackId} to playlist {playlistId}");
+                _logger.LogInformation($"Successfully added track {trackId} to playlist {playlistId}");
             }
             else
             {
@@ -505,25 +505,88 @@ public class TrackCollectionRepository : ITrackCollectionRepository
                                         .FirstOrDefaultAsync(p => p.Id == playlistId);
             if (playlist == null)
             {
-                 _logger.LogWarning($"Playlist not found: ID {playlistId}");
-                 throw new KeyNotFoundException($"Playlist with ID {playlistId} not found.");
+                _logger.LogWarning($"Playlist not found: ID {playlistId}");
+                throw new KeyNotFoundException($"Playlist with ID {playlistId} not found.");
             }
 
             var track = playlist.Tracks.FirstOrDefault(t => t.TrackId == trackId);
             if (track == null)
             {
                 _logger.LogWarning($"Track {trackId} not found in playlist {playlistId}");
-                 return;
+                return;
             }
 
             playlist.RemoveTrack(track);
             await _dbContext.SaveChangesAsync();
-             _logger.LogInformation($"Successfully removed track {trackId} from playlist {playlistId}");
+            _logger.LogInformation($"Successfully removed track {trackId} from playlist {playlistId}");
         }
         catch (Exception ex)
         {
             _logger.LogError($"Error removing track {trackId} from playlist {playlistId}", ex);
             throw;
+        }
+    }
+
+    public async Task<List<Album>> GetAllAlbumsAsync()
+    {
+        try
+        {
+            var albums = await _dbContext.Albums
+                .Include(a => a.Tracks)
+                .ToListAsync();
+            _logger.LogInformation($"Retrieved {albums.Count} album");
+            return albums;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error getting all albums", ex);
+            throw;
+        }
+
+    }
+
+    // --- Implementation for Cleanup --- 
+    public async Task CleanupEmptyCollectionsAsync()
+    {
+        int albumsRemoved = 0;
+        int artistsRemoved = 0; // Placeholder if you track artists separately
+        bool changed = false;
+
+        _logger.LogInformation("Starting cleanup of empty albums.");
+
+        // Find albums with no tracks
+        var emptyAlbums = await _dbContext.Albums
+            .Where(a => !a.Tracks.Any())
+            .ToListAsync();
+
+        if (emptyAlbums.Any())
+        {
+            _logger.LogInformation($"Found {emptyAlbums.Count} empty albums to remove.");
+            _dbContext.Albums.RemoveRange(emptyAlbums);
+            albumsRemoved = emptyAlbums.Count;
+            changed = true;
+        }
+        else
+        {
+            _logger.LogInformation("No empty albums found.");
+        }
+
+        // TODO: Add similar logic for Artists if they are stored as separate entities
+        // and need cleanup when no albums/tracks link to them.
+        // var emptyArtists = await _dbContext.Artists.Where(ar => !ar.Albums.Any() && !ar.Tracks.Any())... etc.
+
+        if (changed)
+        {
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+                _logger.LogInformation($"Cleanup successful. Removed {albumsRemoved} albums."); // Add artistsRemoved if applicable
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error saving changes during empty collection cleanup", ex);
+                // Decide if you need to throw or just log
+            }
         }
     }
 }
