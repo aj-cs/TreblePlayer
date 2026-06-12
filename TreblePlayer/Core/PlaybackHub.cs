@@ -73,7 +73,7 @@ public class PlaybackHub : Hub
 
     public async Task RequestPlayPlaylist(int playlistId, int startIndex = 0)
     {
-        await _player.PlayPlaylistAsync(playlistId, startIndex);
+        await _player.PlayCollectionAsync(playlistId, TrackCollectionType.Playlist, startIndex);
     }
 }
 

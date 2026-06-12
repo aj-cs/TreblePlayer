@@ -20,7 +20,10 @@ builder.Services.AddLogging(logging =>
     logging.SetMinimumLevel(LogLevel.Information);
 });
 
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+});
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -41,6 +44,7 @@ builder.Services.AddScoped<ITrackCollectionRepository, TrackCollectionRepository
 // builder.Services.AddScoped<IFolderService, FolderService>();
 
 builder.Services.AddScoped<IMetadataService, MetadataService>();
+builder.Services.AddScoped<IArtistNormalizationService, ArtistNormalizationService>();
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IArtworkService, ArtworkService>();
 builder.Services.AddSingleton<ILoggingService, LoggingService>();
@@ -121,6 +125,8 @@ await EnsurePlaceholderExists("placeholder2.png", "TreblePlayer.artwork.placehol
 // --- No additional startup code is needed here as the service is designed to do this automatically ---
 
 // Configure the HTTP request pipeline.
+app.UseMiddleware<TreblePlayer.Middleware.ExceptionHandlingMiddleware>();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -131,7 +137,7 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowReactApp");
 
 //might not need this ->
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 
 app.UseAuthorization();
 

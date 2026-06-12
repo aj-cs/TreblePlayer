@@ -1,107 +1,42 @@
-import React, { useState, useEffect, useRef } from 'react'; // Import hooks
-import { Box, Typography, CircularProgress, useTheme } from '@mui/material';
-import AlbumCard from './AlbumCard'; // Import the AlbumCard component
-import { getAlbums } from '../services/apiService'; // Import API function
+import React, { useState, useEffect } from 'react';
+import { Box, Typography, CircularProgress } from '@mui/material';
+import AlbumCard from './AlbumCard';
+import { getAlbums } from '../services/apiService';
 
-// Constants for grid layout
-const MIN_CARD_WIDTH = 180; // Minimum width for each album card
-const GAP_SIZE = 24; // Gap between cards
-
-// Accept gridColumns prop, provide default if necessary
-const AlbumGrid = ({ onAlbumClick, onAlbumHold, gridColumns = 6, setAlbumCount }) => {
+const AlbumGrid = ({ onAlbumClick, onAlbumHold, gridColumns = 6, setAlbumCount, onAlbumDoubleClick }) => {
   const [albums, setAlbums] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const theme = useTheme();
   
   useEffect(() => {
-    const loadAlbums = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await getAlbums();
-        setAlbums(data || []); 
-        // Update album count in parent component
-        if (setAlbumCount && Array.isArray(data)) {
-          setAlbumCount(data.length);
-        }
-      } catch (err) {
-        console.error("Failed to load albums:", err);
-        setError(err.message || 'Failed to load albums.');
-        // Reset album count on error
-        if (setAlbumCount) {
-          setAlbumCount(0);
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    getAlbums().then(data => {
+      setAlbums(data || []);
+      if (setAlbumCount) setAlbumCount(data?.length || 0);
+      setIsLoading(false);
+    });
+  }, []);
 
-    loadAlbums();
-  }, []); // Run once on mount
+  // Fix: Ensure gridColumns is a number and provide a safe fallback
+  const columns = parseInt(gridColumns, 10) || 6;
+  const gap = 16;
+  const itemFlexBasis = `calc((100% - ${(columns - 1) * gap}px) / ${columns})`;
 
-  // Use the passed gridColumns prop
-  const numColumns = gridColumns;
-
-  // Define spacing between items
-  const spacing = 2; // Corresponds to theme.spacing(2) = 16px
-  const spacingValue = spacing * 8; // Convert theme spacing unit to pixels
-
-  // Calculate flex-basis based on the numColumns from props
-  const totalGap = spacingValue * (numColumns - 1);
-  const itemFlexBasis = `calc((100% - ${totalGap}px) / ${numColumns})`;
-
-  if (isLoading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (error) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-        <Typography color="error">Error loading albums: {error}</Typography>
-      </Box>
-    );
-  }
-
-  if (albums.length === 0) {
-     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-        <Typography color="text.secondary">No albums found.</Typography>
-      </Box>
-    );
-  }
+  if (isLoading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>;
   
   return (
-    <Box 
-        sx={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: `${spacingValue}px`,
-            p: spacing,
-            overflowY: 'auto',
-            height: '100%'
-        }}
-    >
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: `${gap}px`, p: 2 }}>
       {albums.map((album) => (
-        <Box 
-            key={album.id} 
-            sx={{
-                flexGrow: 0,
-                flexShrink: 0,
-                flexBasis: itemFlexBasis,
-                minWidth: 0,
-                display: 'flex',
-                alignItems: 'stretch'
-            }}
-        >
+        <Box key={album.id} sx={{ 
+            flexGrow: 0, 
+            flexShrink: 0, 
+            flexBasis: itemFlexBasis, 
+            display: 'flex',
+            maxWidth: itemFlexBasis // Crucial for preventing grid breaking
+        }}>
           <AlbumCard
             album={album}
             onAlbumClick={onAlbumClick}
             onAlbumHold={onAlbumHold}
+            onAlbumDoubleClick={onAlbumDoubleClick}
           />
         </Box>
       ))}
@@ -109,4 +44,4 @@ const AlbumGrid = ({ onAlbumClick, onAlbumHold, gridColumns = 6, setAlbumCount }
   );
 };
 
-export default AlbumGrid; 
+export default AlbumGrid;

@@ -6,3 +6,7 @@ runtimes/
 riderModule.iml
 musicplayer.db
 /_ReSharper.Caches/
+*.db
+*.db-shm
+*.db-wal
+*.log
