@@ -20,11 +20,16 @@ export const getAlbums = () => fetchApi('/Music/albums');
 export const getArtists = () => fetchApi('/Music/artists');
 export const getTracks = () => fetchApi('/Music/tracks');
 export const getPlaylists = () => fetchApi('/Music/playlists');
+export const getQueues = () => fetchApi('/Music/queues');
+export const getQueueById = (id) => fetchApi('/Music/queue/' + id);
+export const reorderQueue = (id, trackIds) => fetchApi('/Music/queue/' + id + '/reorder', { method: 'POST', body: JSON.stringify(trackIds) });
+export const deleteQueue = (queueId) => fetchApi('/Music/queue/' + queueId, { method: 'DELETE' });
 export const getStatus = () => fetchApi('/Music/status');
 export const getActiveQueue = () => fetchApi('/Music/queue/active');
+export const switchToQueue = (queueId) => fetchApi('/Music/queue/switch/' + queueId, { method: 'POST' });
 
 export const playTrack = (trackId) => fetchApi('/Music/play/' + trackId, { method: 'POST' });
-export const playCollection = (id, type, startIndex = 0) => fetchApi('/Music/playCollection/' + id + '/' + type + '?startIndex=' + startIndex, { method: 'POST' });
+export const playCollection = (id, type, startIndex = 0) => fetchApi(`/Music/playCollection/${id}/${type}/${startIndex}`, { method: 'POST' });
 export const resume = () => fetchApi('/Music/resume', { method: 'POST' });
 export const pause = () => fetchApi('/Music/pause', { method: 'POST' });
 export const stop = () => fetchApi('/Music/stop', { method: 'POST' });

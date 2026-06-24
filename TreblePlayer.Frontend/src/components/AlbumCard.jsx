@@ -1,94 +1,72 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Box, Typography, Card, CardContent, CardMedia } from '@mui/material';
+import { Box, Typography, Card } from '@mui/material';
+import { useSettings } from '../contexts/SettingsContext';
 
-const HOLD_DELAY_MS = 300; // Reduced from 500ms to 300ms for faster response
+const HOLD_DELAY_MS = 300;
 
 const AlbumCard = ({ album, onAlbumClick, onAlbumHold, onAlbumDoubleClick }) => {
-  // Use passed album data, provide fallbacks
+  const { albumArtStyle } = useSettings();
   const albumTitle = album?.title || "Album Title";
   const artistName = album?.artist || "Artist Name";
-  const artworkUrl = album?.artworkUrl; // Get URL from props
+  const artworkUrl = album?.artworkUrl;
   
-  // Add state for image error handling and cache busting
   const [imgSrc, setImgSrc] = useState(artworkUrl);
   const [imgError, setImgError] = useState(false);
   
-  // Update image source when album changes
   useEffect(() => {
     if (artworkUrl) {
-      // Add cache busting parameter to force reload
       setImgSrc(`${artworkUrl}?t=${new Date().getTime()}`);
       setImgError(false);
     }
   }, [artworkUrl]);
 
-  // Ref to store the timer ID
   const holdTimerRef = useRef(null);
-  // State to track if the mouse is still down (prevent click after hold)
   const [isHolding, setIsHolding] = useState(false);
 
-  // Cleanup timer on unmount
   useEffect(() => {
     return () => {
-      if (holdTimerRef.current) {
-        clearTimeout(holdTimerRef.current);
-      }
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     };
   }, []);
 
   const handleMouseDown = () => {
-    setIsHolding(false); // Reset hold state
-    // Start a timer. If it finishes before mouse up, trigger hold
+    setIsHolding(false);
     holdTimerRef.current = setTimeout(() => {
       if (onAlbumHold && album) {
-        // console.log('Hold triggered!');
         onAlbumHold(album); 
-        setIsHolding(true); // Mark as holding so click doesn't fire
+        setIsHolding(true);
       }
       holdTimerRef.current = null;
     }, HOLD_DELAY_MS);
   };
 
   const handleMouseUp = () => {
-    // If the timer is still running, clear it (it wasn't a hold)
     if (holdTimerRef.current) {
-      // console.log('Hold cancelled (mouse up)');
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
     }
-    // If mouse is up and we weren't holding, it's a click (handled by onClick)
   };
 
    const handleMouseLeave = () => {
-    // Also clear timer if mouse leaves the card before hold triggers
      if (holdTimerRef.current) {
-      // console.log('Hold cancelled (mouse leave)');
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
     }
   }
 
-  const handleClick = (event) => {
-    // Only trigger click if we weren't holding
+  const handleClick = () => {
     if (!isHolding && onAlbumClick && album) {
-       // console.log('Click triggered!');
        onAlbumClick(album); 
     } 
-    // Reset hold state after click logic (or mouse up)
     setIsHolding(false);
   };
 
-  // Double-click handler
   const handleDoubleClick = () => {
-    if (onAlbumDoubleClick && album) {
-      onAlbumDoubleClick(album);
-    }
+    if (onAlbumDoubleClick && album) onAlbumDoubleClick(album);
   }
   
-  // Handle image loading errors
   const handleImageError = () => {
     setImgError(true);
-    // Try to reload the image without cache
     if (artworkUrl && !imgSrc.includes('?reload=')) {
       setImgSrc(`${artworkUrl}?reload=true&t=${new Date().getTime()}`);
     }
@@ -108,30 +86,20 @@ const AlbumCard = ({ album, onAlbumClick, onAlbumHold, onAlbumDoubleClick }) => 
         display: 'flex',
         flexDirection: 'column',
         userSelect: 'none',
-        borderRadius: 1.5, // Reduced rounding
+        borderRadius: albumArtStyle === 'square' ? 1 : 3,
         overflow: 'hidden',
-        boxShadow: '0 3px 10px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08)', // Enhanced border/outline effect
-        border: '1px solid rgba(255, 255, 255, 0.05)', // Adding subtle border
+        bgcolor: 'rgba(255, 255, 255, 0.03)',
+        border: '1px solid rgba(255, 255, 255, 0.05)',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         '&:hover': {
-          boxShadow: '0 8px 25px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.15)',
-          transform: 'translateY(-4px)',
-          transition: 'transform 0.3s ease-in-out'
-        },
-        transition: 'all 0.2s ease-in-out',
-        bgcolor: 'rgba(25, 25, 25, 0.9)', // Slightly lighter background for contrast with shadow
+          bgcolor: 'rgba(255, 255, 255, 0.06)',
+          borderColor: 'rgba(255, 255, 255, 0.12)',
+          transform: 'translateY(-6px)',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
+        }
       }}
     >
-      {/* Album artwork takes up most of the card, but not overlapped by text */}
-      <Box
-        sx={{
-          width: '100%',
-          flex: '1 1 auto', // Takes up available space
-          position: 'relative',
-          overflow: 'hidden',
-          backgroundColor: 'black', // Solid black background to prevent transparency issues
-        }}
-      >
-        {/* Album artwork */}
+      <Box sx={{ width: '100%', aspectRatio: '1/1', position: 'relative', overflow: 'hidden', bgcolor: '#000', borderRadius: albumArtStyle === 'square' ? 0 : 2 }}>
         {imgSrc && !imgError ? (
           <Box
             component="img"
@@ -142,56 +110,23 @@ const AlbumCard = ({ album, onAlbumClick, onAlbumHold, onAlbumDoubleClick }) => 
             sx={{
               width: '100%',
               height: '100%',
-              objectFit: 'cover', // Cover the entire area
-              display: 'block', // Remove any extra space
-              backgroundColor: 'black', // Add black background
-              imageRendering: 'auto', // Let browser handle rendering
-              transform: 'translateZ(0)', // Force hardware acceleration
-              backfaceVisibility: 'hidden', // Prevent artifacts during transitions
-              WebkitBackfaceVisibility: 'hidden', // For Safari
+              objectFit: 'cover',
+              transition: 'transform 0.5s ease',
+              '.MuiCard-root:hover &': { transform: albumArtStyle === 'square' ? 'scale(1.0)' : 'scale(1.08)' }
             }}
           />
         ) : (
-          <Box
-            sx={{
-              width: '100%',
-              height: '100%',
-              bgcolor: 'grey.900',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Typography variant="h6" color="text.secondary">
-              Album Art
-            </Typography>
+          <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Typography variant="caption" color="text.secondary">NO ART</Typography>
           </Box>
         )}
       </Box>
       
-      {/* Text area below the artwork */}
-      <Box
-        sx={{
-          backgroundColor: 'rgba(20, 20, 20, 0.9)', // Dark background for text
-          color: 'white',
-          padding: 1.5,
-          flexShrink: 0, // Don't shrink this area
-        }}
-      >
-        <Typography 
-          variant="body1" 
-          component="div" 
-          noWrap
-          fontWeight="medium"
-          sx={{ color: 'white' }}
-        >
+      <Box sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <Typography variant="body2" noWrap sx={{ fontWeight: 600, mb: 0.2, color: '#fff' }}>
           {albumTitle}
         </Typography>
-        <Typography 
-          variant="body2" 
-          noWrap
-          sx={{ color: 'rgba(255, 255, 255, 0.8)' }}
-        >
+        <Typography variant="caption" noWrap sx={{ color: 'rgba(255, 255, 255, 0.5)', fontWeight: 500 }}>
           {artistName}
         </Typography>
       </Box>
@@ -199,4 +134,4 @@ const AlbumCard = ({ album, onAlbumClick, onAlbumHold, onAlbumDoubleClick }) => 
   );
 };
 
-export default AlbumCard; 
+export default AlbumCard;

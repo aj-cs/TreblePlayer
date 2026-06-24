@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Box, Button, Typography } from '@mui/material';
+import { Box, Button, Typography, Fade } from '@mui/material';
 import AlbumGrid from './AlbumGrid';
 import TrackListView from './TrackListView';
 import PlaylistGridView from './PlaylistGridView';
 import QueueView from './QueueView';
 import ArtistGridView from './ArtistGridView';
 import Settings from './Settings';
+import QueuesPage from './QueuesPage';
 import SortIcon from '@mui/icons-material/Sort';
 
 const renderCurrentView = (view, props) => {
@@ -14,7 +15,7 @@ const renderCurrentView = (view, props) => {
     case 'Artists': return <ArtistGridView />;
     case 'Tracks': return <TrackListView onTrackDoubleClick={onTrackDoubleClick} />;
     case 'Playlists': return <PlaylistGridView onPlaylistDoubleClick={onPlaylistDoubleClick} />;
-    case 'Queue': return <QueueView />;
+    case 'Queue': return <QueuesPage />;
     case 'Settings': return <Settings />;
     case 'Albums':
     default: return <AlbumGrid onAlbumClick={onAlbumClick} onAlbumHold={onAlbumHold} gridColumns={gridColumns} onAlbumDoubleClick={onAlbumDoubleClick} setAlbumCount={setAlbumCount} />;
@@ -30,7 +31,11 @@ const MainContent = (props) => {
         {props.currentView === 'Albums' && <Button variant="text" startIcon={<SortIcon sx={{ fontSize: '0.9rem' }} />} size="small" sx={{ color: 'primary.main', fontSize: '0.75rem' }}>SORT: ARTIST A-Z</Button>}
       </Box>
       <Box sx={{ flexGrow: 1, overflowY: 'auto', width: '100%' }}> 
-        {renderCurrentView(props.currentView, { ...props, setAlbumCount })}
+        <Fade key={props.currentView} in={true} timeout={300}>
+          <Box sx={{ height: '100%' }}>
+            {renderCurrentView(props.currentView, { ...props, setAlbumCount })}
+          </Box>
+        </Fade>
       </Box>
     </Box>
   );

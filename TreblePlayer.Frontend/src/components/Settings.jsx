@@ -12,15 +12,19 @@ import {
   CircularProgress,
   Alert,
   Stack,
-  Tooltip
+  Tooltip,
+  ToggleButton,
+  ToggleButtonGroup
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import { getMusicFolders, addMusicFolder, removeMusicFolder } from '../services/apiService';
+import { useSettings } from '../contexts/SettingsContext';
 
 const Settings = () => {
+  const { albumArtStyle, setAlbumArtStyle } = useSettings();
   const [folders, setFolders] = useState([]);
   const [newFolder, setNewFolder] = useState('');
   const [loading, setLoading] = useState(true);
@@ -178,6 +182,24 @@ const Settings = () => {
             </Button>
           </Stack>
         </form>
+        
+        <Divider sx={{ mb: 2 }} />
+
+        <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+          UI Customization
+        </Typography>
+        <Box sx={{ mb: 3 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>Album Art Style</Typography>
+            <ToggleButtonGroup
+                value={albumArtStyle}
+                exclusive
+                onChange={(e, val) => val && setAlbumArtStyle(val)}
+                size="small"
+            >
+                <ToggleButton value="curved">Curved Corners</ToggleButton>
+                <ToggleButton value="square">Square</ToggleButton>
+            </ToggleButtonGroup>
+        </Box>
         
         <Divider sx={{ mb: 2 }} />
         

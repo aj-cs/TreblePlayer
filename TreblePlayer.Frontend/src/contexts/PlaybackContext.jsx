@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import * as api from '../services/apiService';
+import { useWebSocket } from './WebSocketContext';
 
 const PlaybackContext = createContext();
 
@@ -10,42 +11,79 @@ export const PlaybackProvider = ({ children }) => {
   const [duration, setDuration] = useState(0);
   const [activeQueue, setActiveQueue] = useState(null);
   const lastTrackIdRef = useRef(null); // Idempotency check
+  const { subscribe } = useWebSocket();
 
   const refreshActiveQueue = useCallback(async () => {
     try {
         const queue = await api.getActiveQueue();
         
-        if (!queue) return;
+        if (!queue) {
+            setActiveQueue(null);
+            setCurrentTrack(null);
+            setPosition(0);
+            return;
+        }
         
         const track = (queue.tracks && queue.currentTrackIndex !== null && queue.currentTrackIndex >= 0 && queue.currentTrackIndex < queue.tracks.length) 
             ? queue.tracks[queue.currentTrackIndex] 
             : null;
 
-        // ONLY update if track actually changed to prevent flickering
-        if (track && track.id !== lastTrackIdRef.current) {
-            console.log("Track changed, updating state:", track.title);
+        // Update track and state if the track exists
+        if (track) {
+            console.log("Updating playback state:", track.title);
             setCurrentTrack(track);
             setDuration(track.duration);
             lastTrackIdRef.current = track.id;
+        } else {
+            setCurrentTrack(null);
+            setDuration(0);
+            lastTrackIdRef.current = null;
         }
 
         setActiveQueue(queue);
         setPosition(queue.lastPlaybackPositionSeconds || 0);
     } catch (e) {
         console.error("Error refreshing active queue:", e);
+        setActiveQueue(null);
+        setCurrentTrack(null);
+        setPosition(0);
     }
   }, []);
 
   useEffect(() => {
-    const pollInterval = setInterval(refreshActiveQueue, 2000);
     refreshActiveQueue();
 
-    const positionInterval = setInterval(() => {
-        if (isPlaying) setPosition(prev => prev + 1);
-    }, 1000);
+    const unsubscribe = subscribe((message) => {
+      switch (message.type) {
+        case 'QueuesUpdated':
+          refreshActiveQueue();
+          break;
+        case 'PlaybackStarted':
+          setIsPlaying(true);
+          refreshActiveQueue();
+          break;
+        case 'PlaybackPaused':
+          setIsPlaying(false);
+          break;
+        case 'PlaybackStopped':
+          setIsPlaying(false);
+          setCurrentTrack(null);
+          setPosition(0);
+          break;
+        case 'PlaybackResumed':
+          setIsPlaying(true);
+          break;
+        case 'PlaybackSeeked':
+          setPosition(message.seconds);
+          break;
+        case 'PositionChanged':
+          setPosition(message.seconds);
+          break;
+      }
+    });
 
-    return () => { clearInterval(pollInterval); clearInterval(positionInterval); };
-  }, [refreshActiveQueue, isPlaying]);
+    return () => unsubscribe();
+  }, [refreshActiveQueue, subscribe]);
 
   const playTrack = async (trackId) => {
     setIsPlaying(true);
@@ -54,6 +92,7 @@ export const PlaybackProvider = ({ children }) => {
   };
 
   const playCollection = async (id, type, startIndex = 0) => {
+    console.log(`playCollection called: id=${id}, type=${type}, startIndex=${startIndex}`);
     setIsPlaying(true);
     await api.playCollection(id, type, startIndex);
     setTimeout(refreshActiveQueue, 800);
@@ -64,6 +103,20 @@ export const PlaybackProvider = ({ children }) => {
     if (isPlaying) await api.pause();
     else await api.resume();
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+        if (e.code === 'Space') {
+            const activeTag = document.activeElement.tagName;
+            if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+                e.preventDefault();
+                togglePlay();
+            }
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePlay]);
 
   const next = async () => { await api.next(); setTimeout(refreshActiveQueue, 500); };
   const previous = async () => { await api.previous(); setTimeout(refreshActiveQueue, 500); };

@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
+import { useWebSocket } from './WebSocketContext';
 
 // Create context
 const StatusContext = createContext();
@@ -8,72 +8,38 @@ export const StatusProvider = ({ children }) => {
   const [status, setStatus] = useState(null); // 'scanning', 'adding', 'removing', 'processing', etc.
   const [message, setMessage] = useState('');
   const [visible, setVisible] = useState(false);
-  const [connection, setConnection] = useState(null);
+  const { subscribe } = useWebSocket();
 
-  // Initialize SignalR connection
+  // Initialize WebSocket subscription
   useEffect(() => {
-    const newConnection = new HubConnectionBuilder()
-      .withUrl('http://localhost:5155/datahub') // Use your actual API URL
-      .withAutomaticReconnect()
-      .configureLogging(LogLevel.Information)
-      .build();
-
-    setConnection(newConnection);
-
-    // Start the connection
-    const startConnection = async () => {
-      try {
-        await newConnection.start();
-        console.log('SignalR connected for status updates');
-        
-        // Register SignalR event handlers
-        newConnection.on('LibraryUpdated', () => {
-          // Handle library updated event
+    const unsubscribe = subscribe((message) => {
+      switch (message.type) {
+        case 'LibraryUpdated':
           showStatus('processing', 'Library updated, refreshing data...');
-        });
-        
-        newConnection.on('MonitoredFoldersUpdated', () => {
-          // Handle monitored folders updated event
+          break;
+        case 'MonitoredFoldersUpdated':
           showStatus('processing', 'Folder settings updated...');
-        });
-        
-        newConnection.on('LibraryCleaned', () => {
-          // Handle library cleaned event
+          break;
+        case 'LibraryCleaned':
           showStatus('removing', 'Library cleaned, removing orphaned files...');
-        });
-        
-        // Custom events (can be added on backend)
-        newConnection.on('ScanningStarted', (folderCount) => {
-          showStatus('scanning', `Scanning ${folderCount} folder(s)...`);
-        });
-        
-        newConnection.on('ScanComplete', () => {
+          break;
+        case 'ScanningStarted':
+          showStatus('scanning', `Scanning ${message.data || ''} folder(s)...`);
+          break;
+        case 'ScanComplete':
           showStatus('processing', 'Scan completed successfully');
-        });
-        
-        newConnection.on('FolderAdded', (folderPath) => {
-          showStatus('adding', `Added folder: ${folderPath}`);
-        });
-        
-        newConnection.on('FolderRemoved', (folderPath) => {
-          showStatus('removing', `Removed folder: ${folderPath}`);
-        });
-        
-      } catch (err) {
-        console.error('SignalR Connection Error: ', err);
-        setTimeout(startConnection, 5000); // Try to reconnect after 5 seconds
+          break;
+        case 'FolderAdded':
+          showStatus('adding', `Added folder: ${message.data || ''}`);
+          break;
+        case 'FolderRemoved':
+          showStatus('removing', `Removed folder: ${message.data || ''}`);
+          break;
       }
-    };
+    });
 
-    startConnection();
-
-    // Cleanup on unmount
-    return () => {
-      if (newConnection) {
-        newConnection.stop();
-      }
-    };
-  }, []);
+    return () => unsubscribe();
+  }, [subscribe]);
 
   // Function to show status message
   const showStatus = (newStatus, newMessage) => {
