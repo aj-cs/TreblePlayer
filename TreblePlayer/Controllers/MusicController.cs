@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using TreblePlayer.Core;
 using TreblePlayer.Data;
 using TreblePlayer.Models;
-using Microsoft.AspNetCore.SignalR;
 using TreblePlayer.Services;
 using TreblePlayer.DTOs;
 
@@ -16,20 +15,20 @@ public class MusicController : ControllerBase
     private readonly ITrackRepository _trackRepository;
     private readonly ITrackCollectionRepository _collectionRepository;
     private readonly ILoggingService _logger;
-    private readonly IHubContext<DataHub> _dataHubContext;
+    private readonly PlaybackWebSocketHandler _webSocketHandler;
 
     public MusicController(
         MusicPlayer musicPlayer,
         ITrackRepository trackRepository,
         ITrackCollectionRepository collectionRepository,
         ILoggingService logger,
-        IHubContext<DataHub> dataHubContext)
+        PlaybackWebSocketHandler webSocketHandler)
     {
         _player = musicPlayer;
         _trackRepository = trackRepository;
         _collectionRepository = collectionRepository;
         _logger = logger;
-        _dataHubContext = dataHubContext;
+        _webSocketHandler = webSocketHandler;
     }
 
     [HttpPost("play/{trackId}")]
@@ -93,11 +92,11 @@ public class MusicController : ControllerBase
         return Ok(new { message = $"Seeked to {seconds} seconds." });
     }
 
-    [HttpPost("playCollection/{collectionId}/{type}")]
-    public async Task<IActionResult> PlayCollection(int collectionId, TrackCollectionType type)
+    [HttpPost("playCollection/{collectionId}/{type}/{startIndex}")]
+    public async Task<IActionResult> PlayCollection(int collectionId, TrackCollectionType type, int startIndex = 0)
     {
-        await _player.PlayCollectionAsync(collectionId, type);
-        return Ok(new { message = $"Playing collection {collectionId} of type {type}" });
+        await _player.PlayCollectionAsync(collectionId, type, startIndex);
+        return Ok(new { message = $"Playing collection {collectionId} of type {type} at index {startIndex}" });
     }
 
     [HttpGet("status")]
@@ -107,24 +106,87 @@ public class MusicController : ControllerBase
         return Ok(new { message = $"Music playing: {isPlaying}" });
     }
 
-    [HttpGet("queue/active")]
-    public async Task<IActionResult> GetActiveQueue()
+    [HttpGet("queues")]
+    public async Task<IActionResult> GetAllQueues()
     {
-        var queue = await _player.GetActiveQueueAsync();
-        if (queue == null) return NotFound(new { message = "No active queue found." });
-        
+        var queues = await _collectionRepository.GetAllQueuesAsync();
+        Console.WriteLine($"GetAllQueues returned {queues.Count} queues.");
+        foreach (var q in queues) Console.WriteLine($"Queue: {q.Title}, TrackCount: {q.Tracks?.Count ?? 0}");
+
+        var activeQueue = await _player.GetActiveQueueAsync();
+
+        var metadata = queues.Select(q => new QueueMetadataDto
+        {
+            Id = q.Id,
+            Title = q.Title,
+            TrackCount = q.Tracks?.Count ?? 0,
+            TotalDuration = q.Tracks?.Sum(t => t.Duration) ?? 0,
+            IsActive = activeQueue?.Id == q.Id,
+            LastPlayedTrackId = q.LastPlayedTrackId
+        }).ToList();
+
+        return Ok(metadata);
+    }
+
+    [HttpGet("queue/{queueId}")]
+    public async Task<IActionResult> GetQueueById(int queueId)
+    {
+        var queue = await _collectionRepository.GetQueueByIdAsync(queueId);
+        if (queue == null) return NotFound();
+
         var queueDto = new QueueDto
         {
             Id = queue.Id,
             Title = queue.Title,
             CurrentTrackIndex = queue.CurrentTrackIndex ?? 0,
             LastPlaybackPositionSeconds = queue.LastPlaybackPositionSeconds,
-            Tracks = queue.Tracks.Where(t => t != null).Select(t => new TrackDto
+            LastPlayedTrackId = queue.LastPlayedTrackId,
+            Tracks = queue.Tracks.Select(t => new TrackDto
             {
                 Id = t.TrackId,
                 Number = t.TrackNumber,
                 Disc = t.DiscNumber,
                 Title = t.Title,
+                Artist = t.Artist,
+                AlbumTitle = t.AlbumTitle ?? string.Empty,
+                Duration = t.Duration,
+                ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/track/{t.TrackId}"
+            }).ToList()
+        };
+        return Ok(queueDto);
+    }
+
+    [HttpPost("queue/switch/{queueId}")]
+    public async Task<IActionResult> SwitchToQueue(int queueId)
+    {
+        await _player.LoadQueueAndPlayAsync(queueId, 0);
+        return Ok(new { message = $"Switched to queue {queueId}" });
+    }
+
+    [HttpGet("queue/active")]
+    public async Task<IActionResult> GetActiveQueue()
+    {
+        var queue = await _player.GetActiveQueueAsync();
+        if (queue == null) return NotFound(new { message = "No active queue found." });
+
+        var orderedTracks = queue.IsShuffleEnabled
+            ? queue.GetShuffledOrder().Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id)).Where(t => t != null).Cast<Track>().ToList()
+            : queue.Tracks.OrderBy(t => t.TrackNumber).ToList();
+
+        var queueDto = new QueueDto
+        {
+            Id = queue.Id,
+            Title = queue.Title,
+            CurrentTrackIndex = queue.CurrentTrackIndex ?? 0,
+            LastPlaybackPositionSeconds = queue.LastPlaybackPositionSeconds,
+            Tracks = orderedTracks.Select(t => new TrackDto
+            {
+                Id = t.TrackId,
+                Number = t.TrackNumber,
+                Disc = t.DiscNumber,
+                Title = t.Title,
+                Artist = t.Artist,
+                AlbumTitle = t.AlbumTitle ?? string.Empty,
                 Duration = t.Duration,
                 ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/track/{t.TrackId}"
             }).ToList()
@@ -137,6 +199,36 @@ public class MusicController : ControllerBase
     {
         await _player.CreateQueueAsync(title);
         return Ok(new { message = $"Queue {title} created." });
+    }
+
+    [HttpDelete("queue/{queueId}")]
+    public async Task<IActionResult> DeleteQueue(int queueId)
+    {
+        try
+        {
+            await _player.DeleteQueueAsync(queueId);
+            _webSocketHandler.BroadcastNotification("QueuesUpdated");
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("queue/{queueId}/reorder")]
+    public async Task<IActionResult> ReorderQueue(int queueId, [FromBody] List<int> trackIds)
+    {
+        try
+        {
+            await _player.ReorderQueueAsync(queueId, trackIds);
+            _webSocketHandler.BroadcastNotification("QueueUpdated", new { queueId });
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("queue/{queueId}/addTrack/{trackId}")]
@@ -231,7 +323,7 @@ public class MusicController : ControllerBase
             trackAdditionErrors = trackAddErrors.Any() ? trackAddErrors : null
         };
 
-        await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated");
+        _webSocketHandler.BroadcastNotification("PlaylistsUpdated");
         return CreatedAtAction(nameof(GetPlaylistById), new { playlistId = newPlaylist.Id }, responsePayload);
     }
 
@@ -241,7 +333,7 @@ public class MusicController : ControllerBase
         try
         {
             await _collectionRepository.RemovePlaylistAsync(playlistId);
-            await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated");
+            _webSocketHandler.BroadcastNotification("PlaylistsUpdated");
             return NoContent();
         }
         catch (KeyNotFoundException)
@@ -256,7 +348,7 @@ public class MusicController : ControllerBase
         try
         {
             await _collectionRepository.AddTrackToPlaylistAsync(playlistId, trackId);
-            await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated");
+            _webSocketHandler.BroadcastNotification("PlaylistsUpdated");
             return Ok(new { message = $"Track {trackId} added to playlist {playlistId}." });
         }
         catch (KeyNotFoundException ex)
@@ -271,7 +363,7 @@ public class MusicController : ControllerBase
         try
         {
             await _collectionRepository.RemoveTrackFromPlaylistAsync(playlistId, trackId);
-            await _dataHubContext.Clients.All.SendAsync("PlaylistsUpdated");
+            _webSocketHandler.BroadcastNotification("PlaylistsUpdated");
             return Ok(new { message = $"Track {trackId} removed from playlist {playlistId}." });
         }
         catch (KeyNotFoundException ex)
@@ -302,6 +394,8 @@ public class MusicController : ControllerBase
                 Number = t.TrackNumber,
                 Disc = t.DiscNumber,
                 Title = t.Title,
+                Artist = t.Artist,
+                AlbumTitle = album.Title,
                 Duration = t.Duration,
                 ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{album.Id}"
             }).OrderBy(t => t.Disc).ThenBy(t => t.Number).ToList() ?? new List<TrackDto>()
@@ -339,6 +433,8 @@ public class MusicController : ControllerBase
                         Number = t.TrackNumber,
                         Disc = t.DiscNumber,
                         Title = t.Title,
+                        Artist = t.Artist,
+                        AlbumTitle = album.Title,
                         Duration = t.Duration,
                         ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{album.Id}"
                     }).OrderBy(t => t.Disc).ThenBy(t => t.Number).ToList() ?? new List<TrackDto>()
@@ -349,6 +445,24 @@ public class MusicController : ControllerBase
 
         return Ok(artists);
     }
+    [HttpPost("tracks/sorted")]
+    public async Task<IActionResult> GetSortedTracksWithSpecification([FromBody] List<SortSpecification> specs)
+    {
+        if (specs == null || specs.Count == 0)
+        {
+            specs = new List<SortSpecification> {
+                new SortSpecification { Field = "artist", Direction = SortDirection.Ascending}
+            };
+        }
+
+        var tracks = await _trackRepository.GetAllTracksAsync();
+        var query = tracks.AsQueryable();
+
+        var sortedQuery = QueryBuilder.ApplySort
+    }
+
+
+
 
     [HttpGet("tracks")]
     public async Task<IActionResult> GetAllTracks()

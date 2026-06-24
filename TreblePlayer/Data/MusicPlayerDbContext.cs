@@ -1,6 +1,7 @@
-namespace TreblePlayer.Data;
 using TreblePlayer.Models;
 using Microsoft.EntityFrameworkCore;
+namespace TreblePlayer.Data;
+
 public class MusicPlayerDbContext : DbContext
 {
     public MusicPlayerDbContext(DbContextOptions<MusicPlayerDbContext> options) : base(options) { }
@@ -10,6 +11,7 @@ public class MusicPlayerDbContext : DbContext
     public DbSet<Playlist> Playlists { get; set; }
     public DbSet<TrackQueue> TrackQueues { get; set; }
     public DbSet<MonitoredFolder> MonitoredFolders { get; set; }
+    public DbSet<ArtistAlias> ArtistAliases { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -78,6 +80,17 @@ public class MusicPlayerDbContext : DbContext
             .HasForeignKey(t => t.AlbumId) // Assuming Track has AlbumId foreign key
             .OnDelete(DeleteBehavior.Cascade); // Or SetNull / Restrict depending on desired behavior
 
+        // TODO: ArtistAlias model builder
+        modelBuilder.Entity<ArtistAlias>()
+            .HasKey(a => a.Id);
+
+        modelBuilder.Entity<ArtistAlias>()
+            .Property(a => a.Id)
+            .ValueGeneratedOnAdd();
+
+        modelBuilder.Entity<ArtistAlias>()
+            .HasIndex(a => a.AliasName)
+            .IsUnique();
         base.OnModelCreating(modelBuilder); //idk if this is necessary
     }
 }

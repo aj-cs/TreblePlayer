@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TreblePlayer.Core;
 using TreblePlayer.Data;
@@ -16,7 +15,7 @@ public class MetadataService : IMetadataService
     private readonly IArtworkService _artworkService;
     private readonly IArtistNormalizationService _artistNormalization;
     private readonly ILoggingService _logger;
-    private readonly IHubContext<DataHub> _dataHub;
+    private readonly PlaybackWebSocketHandler _webSocketHandler;
 
     private static readonly string[] SupportedExtensions = { ".mp3", ".flac", ".alac", ".opus", ".wav", ".aac", ".ogg" };
 
@@ -27,7 +26,7 @@ public class MetadataService : IMetadataService
         IArtworkService artworkService,
         IArtistNormalizationService artistNormalization,
         ILoggingService logger,
-        IHubContext<DataHub> dataHub)
+        PlaybackWebSocketHandler webSocketHandler)
     {
         _dbContext = dbContext;
         _trackRepository = trackRepository;
@@ -35,7 +34,7 @@ public class MetadataService : IMetadataService
         _artworkService = artworkService;
         _artistNormalization = artistNormalization;
         _logger = logger;
-        _dataHub = dataHub;
+        _webSocketHandler = webSocketHandler;
     }
 
     public async Task<List<TrackMetadata>> GetTrackMetadataFromFolderAsync(string folderPath)
@@ -95,7 +94,7 @@ public class MetadataService : IMetadataService
             if (i + batchSize < folderList.Count) await Task.Delay(100);
         }
 
-        await _dataHub.Clients.All.SendAsync("LibraryUpdated");
+        _webSocketHandler.BroadcastNotification("LibraryUpdated");
     }
 
     public async Task ScanMusicFolderAsync(string folderPath)
@@ -254,7 +253,7 @@ public class MetadataService : IMetadataService
             }
         }
 
-        if (changed) await _dataHub.Clients.All.SendAsync("LibraryUpdated");
+        if (changed) _webSocketHandler.BroadcastNotification("LibraryUpdated");
     }
 
     private bool IsMusicFile(string path)
@@ -292,7 +291,7 @@ public class MetadataService : IMetadataService
         if (updated > 0)
         {
             await _dbContext.SaveChangesAsync();
-            await _dataHub.Clients.All.SendAsync("LibraryUpdated");
+            _webSocketHandler.BroadcastNotification("LibraryUpdated");
         }
     }
 }

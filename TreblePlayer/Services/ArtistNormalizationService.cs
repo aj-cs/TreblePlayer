@@ -7,6 +7,8 @@ public interface IArtistNormalizationService
 
 public class ArtistNormalizationService : IArtistNormalizationService
 {
+    private readonly IArtistAliasService _aliasService;
+
     private static readonly string[] KnownArtistsWithCommas = new[]
     {
         "tyler, the creator",
@@ -26,7 +28,18 @@ public class ArtistNormalizationService : IArtistNormalizationService
         " feat "
     };
 
+    public ArtistNormalizationService(IArtistAliasService aliasService)
+    {
+        _aliasService = aliasService;
+    }
+
     public string NormalizeArtistName(string artistName, out string fullArtistString, out string collaborators, out string featuredArtists)
+    {
+        string parsedArtist = ParseArtistName(artistName, out fullArtistString, out collaborators, out featuredArtists);
+        return _aliasService.GetCanonicalArtistName(parsedArtist);
+    }
+
+    private string ParseArtistName(string artistName, out string fullArtistString, out string collaborators, out string featuredArtists)
     {
         if (string.IsNullOrEmpty(artistName))
         {

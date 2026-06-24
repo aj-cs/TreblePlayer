@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TreblePlayer.Data;
 using TreblePlayer.Models;
-using Microsoft.AspNetCore.SignalR; // For Hub Context
 using TreblePlayer.Core; // <<< Add this using statement
 using TreblePlayer.Services; // <<< Add using for Services
 using System.Collections.Generic; // For List<>
@@ -18,20 +17,20 @@ namespace TreblePlayer.Controllers
     public class SettingsController : ControllerBase
     {
         private readonly MusicPlayerDbContext _context;
-        private readonly IHubContext<DataHub> _dataHubContext;
+        private readonly PlaybackWebSocketHandler _webSocketHandler;
         private readonly ILogger<SettingsController> _logger; // Use standard ILogger
         private readonly IMetadataService _metadataService; // <<< Add field
         private readonly OrphanedDataCleanupService _cleanupService; // Add this field
 
         public SettingsController(
             MusicPlayerDbContext context, 
-            IHubContext<DataHub> dataHubContext, 
+            PlaybackWebSocketHandler webSocketHandler, 
             ILogger<SettingsController> logger,
             IMetadataService metadataService,
             OrphanedDataCleanupService cleanupService) // Add parameter
         {
             _context = context;
-            _dataHubContext = dataHubContext;
+            _webSocketHandler = webSocketHandler;
             _logger = logger;
             _metadataService = metadataService;
             _cleanupService = cleanupService; // Assign field
@@ -78,8 +77,8 @@ namespace TreblePlayer.Controllers
                 await _context.SaveChangesAsync();
                 _logger.LogInformation($"Successfully added monitored folder: {normalizedPath} (ID: {newFolder.Id})");
 
-                // Notify frontend via SignalR
-                await _dataHubContext.Clients.All.SendAsync("MonitoredFoldersUpdated");
+                // Notify frontend via WebSocket
+                _webSocketHandler.BroadcastNotification("MonitoredFoldersUpdated");
 
                 // Automatically scan the new folder
                 try
@@ -89,7 +88,7 @@ namespace TreblePlayer.Controllers
                     _logger.LogInformation($"Automatic scan of new folder completed: {normalizedPath}");
                     
                     // Notify frontend that library has been updated
-                    await _dataHubContext.Clients.All.SendAsync("LibraryUpdated");
+                    _webSocketHandler.BroadcastNotification("LibraryUpdated");
                 }
                 catch (Exception scanEx)
                 {
@@ -134,8 +133,8 @@ namespace TreblePlayer.Controllers
                 await _context.SaveChangesAsync();
                 _logger.LogInformation($"Successfully removed monitored folder: {folderPath} (ID: {id})");
 
-                // Notify frontend via SignalR about the folder removal
-                await _dataHubContext.Clients.All.SendAsync("MonitoredFoldersUpdated");
+                // Notify frontend via WebSocket about the folder removal
+                _webSocketHandler.BroadcastNotification("MonitoredFoldersUpdated");
                 
                 // Immediately trigger cleanup for the removed folder
                 try
@@ -184,7 +183,7 @@ namespace TreblePlayer.Controllers
                 await _metadataService.ScanMusicFromDirectoryAsync(monitoredFolders);
                 
                 _logger.LogInformation("Scan of all monitored folders completed successfully (via API trigger).");
-                // MetadataService will send the SignalR notification upon its completion
+                // MetadataService will send the WebSocket notification upon its completion
                 return Ok("Scan initiated for all monitored folders."); // Or Accepted() if run in background
             }
             catch (Exception ex)
@@ -225,7 +224,7 @@ namespace TreblePlayer.Controllers
                 await _metadataService.ScanMusicFolderAsync(absolutePath);
 
                 _logger.LogInformation($"Scan of specific folder completed successfully (via API trigger): {absolutePath}");
-                // MetadataService will send the SignalR notification upon its completion
+                // MetadataService will send the WebSocket notification upon its completion
                 return Ok($"Scan initiated for folder: {absolutePath}"); // Or Accepted()
             }
             catch (Exception ex)

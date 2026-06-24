@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using Microsoft.AspNetCore.SignalR;
 using TreblePlayer.Data;
 using TreblePlayer.Core;
 using TreblePlayer.Services;
@@ -27,7 +26,7 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddSignalR();
+
 //needed for react ->
 builder.Services.AddCors(options =>
 {
@@ -48,13 +47,9 @@ builder.Services.AddScoped<IArtistNormalizationService, ArtistNormalizationServi
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IArtworkService, ArtworkService>();
 builder.Services.AddSingleton<ILoggingService, LoggingService>();
-builder.Services.AddSingleton<MusicPlayer>(sp =>
-{
-    var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-    var hubContext = sp.GetRequiredService<IHubContext<PlaybackHub>>();
-    var logger = sp.GetRequiredService<ILoggingService>();
-    return new MusicPlayer(scopeFactory, hubContext, logger);
-});
+builder.Services.AddSingleton<MusicPlayer>();
+builder.Services.AddSingleton<PlaybackWebSocketHandler>();
+builder.Services.AddSingleton<IArtistAliasService, ArtistAliasService>();
 
 // Register OrphanedDataCleanupService as both a Singleton (for controller injection) and a Hosted Service
 // This allows it to be injected into controllers while still functioning as a background service
@@ -133,15 +128,29 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-//Needed for react ->
 app.UseCors("AllowReactApp");
 
 //might not need this ->
 //app.UseHttpsRedirection();
 
+app.UseWebSockets();
+
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHub<PlaybackHub>("/treblehub");
-app.MapHub<DataHub>("/datahub");
+
+app.Map("/ws", async context =>
+{
+    if (context.WebSockets.IsWebSocketRequest)
+    {
+        using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+        var handler = context.RequestServices.GetRequiredService<PlaybackWebSocketHandler>();
+        await handler.HandleAsync(context, webSocket);
+    }
+    else
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+    }
+});
+
 app.Run();

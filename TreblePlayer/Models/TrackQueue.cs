@@ -8,6 +8,10 @@ public class TrackQueue : ITrackCollection
     public int Id { get; set; } //queue Id, change to hashcode later
 
     public string Title { get; set; }
+    public int? CollectionId { get; set; }
+    public TrackCollectionType? OriginCollectionType { get; set; }
+    public int? LastPlayedTrackId { get; set; }
+    public bool IsManuallyModified { get; set; } = false;
     public int Size { get => Tracks?.Count ?? 0; }
     public LoopTrack LoopTrack { get; set; } = LoopTrack.None;
     public DateTime DateCreated { get; set; }

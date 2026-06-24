@@ -22,6 +22,8 @@ public class TrackDto
     public int? Number { get; set; }
     public int Disc { get; set; }
     public string Title { get; set; } = string.Empty;
+    public string Artist { get; set; } = string.Empty;
+    public string AlbumTitle { get; set; } = string.Empty;
     public int Duration { get; set; }
     public string ArtworkUrl { get; set; } = string.Empty;
 }
@@ -32,7 +34,18 @@ public class QueueDto
     public string Title { get; set; } = string.Empty;
     public int CurrentTrackIndex { get; set; }
     public float? LastPlaybackPositionSeconds { get; set; }
+    public int? LastPlayedTrackId { get; set; }
     public List<TrackDto> Tracks { get; set; } = new List<TrackDto>();
+}
+
+public class QueueMetadataDto
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public int TrackCount { get; set; }
+    public int TotalDuration { get; set; }
+    public bool IsActive { get; set; }
+    public int? LastPlayedTrackId { get; set; }
 }
 
 public class ArtistDto

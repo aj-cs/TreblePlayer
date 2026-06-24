@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using TreblePlayer.Data; // For repositories
 using TreblePlayer.Models; // For Track
-using Microsoft.AspNetCore.SignalR; // For Hub Context
 using TreblePlayer.Core;
 // using TreblePlayer.Hubs;      // Assuming DataHub is in root namespace now
 
@@ -26,13 +25,17 @@ namespace TreblePlayer.Services
         private readonly TimeSpan _checkInterval = TimeSpan.FromHours(6); // How often to check
         private readonly TimeSpan _initialDelay = TimeSpan.FromMinutes(1); // Delay after startup
 
+        private readonly PlaybackWebSocketHandler _webSocketHandler;
+
         public OrphanedDataCleanupService(
             // Inject standard ILogger instead of custom ILoggingService for Hosted Services
             ILogger<OrphanedDataCleanupService> logger, 
-            IServiceScopeFactory scopeFactory)
+            IServiceScopeFactory scopeFactory,
+            PlaybackWebSocketHandler webSocketHandler)
         {
             _logger = logger;
             _scopeFactory = scopeFactory;
+            _webSocketHandler = webSocketHandler;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -116,8 +119,7 @@ namespace TreblePlayer.Services
                 var trackRepository = scope.ServiceProvider.GetRequiredService<ITrackRepository>();
                 var collectionRepository = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
                 // Ensure DataHub is accessible here. If it's in a namespace, add a using statement at the top.
-                var dataHubContext = scope.ServiceProvider.GetRequiredService<IHubContext<DataHub>>(); 
-
+                
                 List<Track> allDbTracks; 
                 try
                 {
@@ -217,18 +219,10 @@ namespace TreblePlayer.Services
                      _logger.LogInformation("No orphaned tracks found based on folder/file checks.");
                 }
 
-                // --- Send notification if cleanup occurred --- 
                 if (changesMade)
                 {
                     _logger.LogInformation("Cleanup finished and DB changes were made. Sending LibraryCleaned notification.");
-                    try
-                    {
-                        await dataHubContext.Clients.All.SendAsync("LibraryCleaned");
-                    }
-                    catch (Exception ex)
-                    {
-                         _logger.LogError(ex, "Error sending LibraryCleaned SignalR notification.");
-                    }
+                    _webSocketHandler.BroadcastNotification("LibraryCleaned");
                 }
             } // End of using scope
 
@@ -262,8 +256,7 @@ namespace TreblePlayer.Services
             {
                 var trackRepository = scope.ServiceProvider.GetRequiredService<ITrackRepository>();
                 var collectionRepository = scope.ServiceProvider.GetRequiredService<ITrackCollectionRepository>();
-                var dataHubContext = scope.ServiceProvider.GetRequiredService<IHubContext<DataHub>>();
-                
+                                
                 List<Track> allDbTracks;
                 try
                 {
@@ -316,19 +309,11 @@ namespace TreblePlayer.Services
                     _logger.LogInformation($"No tracks found in the database from folder: {folderPath}");
                 }
                 
-                // Send notification if changes were made
                 if (changesMade)
                 {
-                    try
-                    {
-                        await dataHubContext.Clients.All.SendAsync("LibraryUpdated");
-                        await dataHubContext.Clients.All.SendAsync("LibraryCleaned");
-                        _logger.LogInformation("Sent library update notifications after folder cleanup");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error sending notifications after folder cleanup");
-                    }
+                    _webSocketHandler.BroadcastNotification("LibraryUpdated");
+                    _webSocketHandler.BroadcastNotification("LibraryCleaned");
+                    _logger.LogInformation("Sent library update notifications after folder cleanup");
                 }
             }
             

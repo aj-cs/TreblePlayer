@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TreblePlayer.Data;
 
@@ -10,9 +11,11 @@ using TreblePlayer.Data;
 namespace TreblePlayer.Migrations
 {
     [DbContext(typeof(MusicPlayerDbContext))]
-    partial class MusicPlayerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260617191906_AddCollectionIdToTrackQueue")]
+    partial class AddCollectionIdToTrackQueue
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.10");
@@ -83,28 +86,6 @@ namespace TreblePlayer.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Albums");
-                });
-
-            modelBuilder.Entity("TreblePlayer.Models.ArtistAlias", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("AliasName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CanonicalName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AliasName")
-                        .IsUnique();
-
-                    b.ToTable("ArtistAliases");
                 });
 
             modelBuilder.Entity("TreblePlayer.Models.MonitoredFolder", b =>
@@ -231,9 +212,6 @@ namespace TreblePlayer.Migrations
                     b.Property<bool>("IsLoopEnabled")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("IsManuallyModified")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("IsSessionQueue")
                         .HasColumnType("INTEGER");
 
@@ -246,13 +224,7 @@ namespace TreblePlayer.Migrations
                     b.Property<float?>("LastPlaybackPositionSeconds")
                         .HasColumnType("REAL");
 
-                    b.Property<int?>("LastPlayedTrackId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<int>("LoopTrack")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("OriginCollectionType")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ShuffledTrackIds")
