@@ -46,10 +46,12 @@ builder.Services.AddScoped<IMetadataService, MetadataService>();
 builder.Services.AddScoped<IArtistNormalizationService, ArtistNormalizationService>();
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IArtworkService, ArtworkService>();
+builder.Services.AddSingleton<LibraryScanProgressService>();
 builder.Services.AddSingleton<ILoggingService, LoggingService>();
 builder.Services.AddSingleton<MusicPlayer>();
 builder.Services.AddSingleton<PlaybackWebSocketHandler>();
 builder.Services.AddSingleton<IArtistAliasService, ArtistAliasService>();
+builder.Services.AddSingleton<IArtistNormalizationSettingsService, ArtistNormalizationSettingsService>();
 
 // Register OrphanedDataCleanupService as both a Singleton (for controller injection) and a Hosted Service
 // This allows it to be injected into controllers while still functioning as a background service
@@ -57,9 +59,30 @@ builder.Services.AddSingleton<OrphanedDataCleanupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OrphanedDataCleanupService>());
 
 // Register other hosted services
-builder.Services.AddHostedService<FolderMonitoringService>();
+builder.Services.AddSingleton<FolderMonitoringService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderMonitoringService>());
 
 var app = builder.Build();
+
+// Allow library reads to continue while the background scanner writes to
+// SQLite. WAL is persisted in the database and requires no schema migration.
+try
+{
+    await using (var databaseScope = app.Services.CreateAsyncScope())
+    {
+        var database = databaseScope.ServiceProvider.GetRequiredService<MusicPlayerDbContext>();
+        await database.Database.MigrateAsync();
+        await database.Database.OpenConnectionAsync();
+        await database.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+        Console.WriteLine("SQLite write-ahead logging enabled.");
+    }
+}
+catch (Exception ex)
+{
+    // Keep startup resilient if the configured database is read-only or sits
+    // on a filesystem that does not support SQLite WAL mode.
+    Console.WriteLine($"Unable to enable SQLite WAL mode: {ex.Message}");
+}
 
 // Ensure artwork directory and placeholders exist
 var artworkBasePath = Path.Combine(AppContext.BaseDirectory, "artwork");
@@ -77,7 +100,7 @@ if (!Directory.Exists(artworkBasePath))
     }
 }
 
-// --- Refactor placeholder check into a helper function ---
+// placeholder check helper function
 async Task EnsurePlaceholderExists(string placeholderFileName, string resourceName)
 {
     var placeholderPath = Path.Combine(artworkBasePath, placeholderFileName);
@@ -111,13 +134,12 @@ async Task EnsurePlaceholderExists(string placeholderFileName, string resourceNa
     }
 }
 
-// --- Call the helper for both placeholders ---
 await EnsurePlaceholderExists("placeholder.png", "TreblePlayer.artwork.placeholder.png");
 await EnsurePlaceholderExists("placeholder2.png", "TreblePlayer.artwork.placeholder2.png");
 
-// --- The FolderMonitoringService will automatically scan all monitored folders on startup ---
-// --- This is handled in the StartAsync method of the FolderMonitoringService class ---
-// --- No additional startup code is needed here as the service is designed to do this automatically ---
+// FolderMonitoringService will automatically scan all monitored folders on startup
+// This is handled in the StartAsync method of the FolderMonitoringService class
+// No additional startup code is needed here cuz the service is designed to do this automatically
 
 // Configure the HTTP request pipeline.
 app.UseMiddleware<TreblePlayer.Middleware.ExceptionHandlingMiddleware>();
