@@ -51,12 +51,31 @@ public class ArtistAliasService : IArtistAliasService
     }
     public async Task AddAliasAsync(string aliasName, string canonicalName)
     {
-        ArtistAlias alias = new ArtistAlias { AliasName = aliasName, CanonicalName = canonicalName };
+        aliasName = aliasName?.Trim() ?? string.Empty;
+        canonicalName = canonicalName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(aliasName) || string.IsNullOrWhiteSpace(canonicalName))
+            throw new ArgumentException("Both alias and canonical artist names are required.");
+        if (string.Equals(aliasName, canonicalName, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("An artist cannot be an alias of itself.");
+
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<MusicPlayerDbContext>();
-        await dbContext.ArtistAliases.AddAsync(alias);
+        var existing = await dbContext.ArtistAliases
+            .FirstOrDefaultAsync(a => a.AliasName.ToLower() == aliasName.ToLower());
+        if (existing != null)
+        {
+            existing.CanonicalName = canonicalName;
+        }
+        else
+        {
+            await dbContext.ArtistAliases.AddAsync(new ArtistAlias
+            {
+                AliasName = aliasName,
+                CanonicalName = canonicalName
+            });
+        }
         await dbContext.SaveChangesAsync();
-        _aliasCache[aliasName.Trim()] = canonicalName.Trim();
+        _aliasCache[aliasName] = canonicalName;
     }
 
     public string GetCanonicalArtistName(string name)
@@ -80,7 +99,9 @@ public class ArtistAliasService : IArtistAliasService
 
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<MusicPlayerDbContext>();
-        var aliasEntity = await dbContext.ArtistAliases.FirstOrDefaultAsync(a => a.AliasName == aliasName && a.CanonicalName == canonicalName);
+        var aliasEntity = await dbContext.ArtistAliases.FirstOrDefaultAsync(a =>
+            a.AliasName.ToLower() == formatted.ToLower() &&
+            a.CanonicalName.ToLower() == canonicalName.Trim().ToLower());
 
         if (aliasEntity == null)
         {

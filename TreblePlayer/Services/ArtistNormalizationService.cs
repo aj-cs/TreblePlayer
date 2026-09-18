@@ -8,6 +8,7 @@ public interface IArtistNormalizationService
 public class ArtistNormalizationService : IArtistNormalizationService
 {
     private readonly IArtistAliasService _aliasService;
+    private readonly IArtistNormalizationSettingsService _settingsService;
 
     private static readonly string[] KnownArtistsWithCommas = new[]
     {
@@ -19,18 +20,17 @@ public class ArtistNormalizationService : IArtistNormalizationService
         "rob base & dj e-z rock"
     };
 
-    private static readonly string[] FeaturingPatterns = new[]
-    {
-        " featuring ",
-        " ft. ",
-        " ft ",
-        " feat. ",
-        " feat "
-    };
-
     public ArtistNormalizationService(IArtistAliasService aliasService)
+        : this(aliasService, null)
+    {
+    }
+
+    public ArtistNormalizationService(
+        IArtistAliasService aliasService,
+        IArtistNormalizationSettingsService? settingsService)
     {
         _aliasService = aliasService;
+        _settingsService = settingsService ?? new DefaultArtistNormalizationSettingsService();
     }
 
     public string NormalizeArtistName(string artistName, out string fullArtistString, out string collaborators, out string featuredArtists)
@@ -61,13 +61,13 @@ public class ArtistNormalizationService : IArtistNormalizationService
         int firstFeaturingIndex = -1;
         string? matchedPattern = null;
 
-        foreach (var pattern in FeaturingPatterns)
+        foreach (var keyword in _settingsService.GetFeaturingKeywords())
         {
-            int index = artistName.IndexOf(pattern, StringComparison.OrdinalIgnoreCase);
+            int index = FindKeywordIndex(artistName, keyword);
             if (index > 0 && (firstFeaturingIndex == -1 || index < firstFeaturingIndex))
             {
                 firstFeaturingIndex = index;
-                matchedPattern = pattern;
+                matchedPattern = keyword.Trim();
             }
         }
 
@@ -103,5 +103,35 @@ public class ArtistNormalizationService : IArtistNormalizationService
         }
 
         return artistName.Trim();
+    }
+
+    private static int FindKeywordIndex(string artistName, string keyword)
+    {
+        var normalizedKeyword = keyword.Trim();
+        if (normalizedKeyword.Length == 0) return -1;
+
+        var start = 0;
+        while (start < artistName.Length)
+        {
+            var index = artistName.IndexOf(normalizedKeyword, start, StringComparison.OrdinalIgnoreCase);
+            if (index < 0) return -1;
+
+            var beforeIsBoundary = index == 0 || char.IsWhiteSpace(artistName[index - 1]);
+            var afterIndex = index + normalizedKeyword.Length;
+            var afterIsBoundary = afterIndex >= artistName.Length || char.IsWhiteSpace(artistName[afterIndex]);
+            if (beforeIsBoundary && afterIsBoundary) return index;
+
+            start = afterIndex;
+        }
+
+        return -1;
+    }
+
+    private sealed class DefaultArtistNormalizationSettingsService : IArtistNormalizationSettingsService
+    {
+        private static readonly string[] Defaults = { "featuring", "feat.", "feat", "ft.", "ft" };
+
+        public IReadOnlyList<string> GetFeaturingKeywords() => Defaults;
+        public void SetFeaturingKeywords(IEnumerable<string> keywords) { }
     }
 }

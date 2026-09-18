@@ -9,6 +9,14 @@ public class ArtworkService : IArtworkService
 {
     private readonly ILoggingService _logger;
     private readonly string _artworkBaseDirectory = Path.Combine(AppContext.BaseDirectory, "artwork");
+    private static readonly string[] ImageExtensions =
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"
+    };
+    private static readonly string[] PreferredCoverNames =
+    {
+        "cover", "folder", "albumart", "album-art", "front", "front-cover", "artwork"
+    };
 
     public ArtworkService(ILoggingService logger)
     {
@@ -22,38 +30,68 @@ public class ArtworkService : IArtworkService
 
     private string? FindCoverInFolder(string folderPath)
     {
-        var possibleFiles = new[] { "cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.jpeg", "folder.png" };
-        foreach (var file in possibleFiles)
+        foreach (var preferredName in PreferredCoverNames)
         {
-            var filePath = Path.Combine(folderPath, file);
-            if (File.Exists(filePath))
-            {
-                return filePath;
-            }
+            var match = GetImageFiles(folderPath)
+                .FirstOrDefault(path => string.Equals(
+                    Path.GetFileNameWithoutExtension(path),
+                    preferredName,
+                    StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
         }
+
         return null;
     }
 
-    private string? ExtractEmbeddedArtwork(string trackFilePath, string saveToPath)
+    private string? FindSingleImageInFolder(string folderPath)
     {
-        var file = new ATL.Track(trackFilePath);
-        var pic = file.EmbeddedPictures.FirstOrDefault();
+        var imageFiles = GetImageFiles(folderPath).ToList();
+        return imageFiles.Count == 1 ? imageFiles[0] : null;
+    }
 
-        if (pic != null)
+    private IEnumerable<string> GetImageFiles(string folderPath)
+    {
+        if (!Directory.Exists(folderPath))
+            return Enumerable.Empty<string>();
+
+        try
         {
-            var fileName = Path.Combine(saveToPath, $"{Path.GetFileNameWithoutExtension(trackFilePath)}.jpg");
-            try
+            return Directory.EnumerateFiles(folderPath, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => ImageExtensions.Contains(
+                    Path.GetExtension(path),
+                    StringComparer.OrdinalIgnoreCase))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Could not inspect artwork in {folderPath}: {ex.Message}");
+            return Enumerable.Empty<string>();
+        }
+    }
+
+    private string? ExtractEmbeddedArtwork(string trackFilePath, string saveToPath, string outputName)
+    {
+        if (!File.Exists(trackFilePath)) return null;
+
+        try
+        {
+            var file = new ATL.Track(trackFilePath);
+            var pic = file.EmbeddedPictures.FirstOrDefault();
+
+            if (pic != null)
             {
+                var fileName = Path.Combine(saveToPath, $"{outputName}.jpg");
                 _logger.LogDebug($"Attempting to write embedded artwork for {trackFilePath}");
                 File.WriteAllBytes(fileName, pic.PictureData);
                 _logger.LogDebug($"Successfully wrote embedded artwork for {trackFilePath}");
                 return fileName;
             }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Failed to write embedded artwork for {trackFilePath}: {ex.Message}");
-            }
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Could not extract embedded artwork from {trackFilePath}: {ex.Message}");
+        }
+
         return null;
     }
 
@@ -70,7 +108,7 @@ public class ArtworkService : IArtworkService
         }
 
         // embedded
-        var embedded = ExtractEmbeddedArtwork(track.FilePath, _artworkBaseDirectory);
+        var embedded = ExtractEmbeddedArtwork(track.FilePath!, _artworkBaseDirectory, $"track_{track.TrackId}");
         if (embedded != null)
         {
             track.ArtworkPath = embedded;
@@ -103,7 +141,21 @@ public class ArtworkService : IArtworkService
             return GetDefaultArtworkPath();
         }
 
-        //check for local image first
+        // Prefer artwork embedded in the album files. Some libraries keep
+        // their authoritative cover there even when a folder image exists.
+        foreach (var track in album.Tracks
+                     .OrderBy(track => track.DiscNumber)
+                     .ThenBy(track => track.TrackNumber ?? int.MaxValue))
+        {
+            var embedded = ExtractEmbeddedArtwork(track.FilePath, _artworkBaseDirectory, $"album_{album.Id}");
+            if (embedded != null)
+            {
+                album.ArtworkPath = embedded;
+                return embedded;
+            }
+        }
+
+        // Then use a deliberately named folder image, case-insensitively.
         var local = FindCoverInFolder(album.FolderPath);
         if (local != null)
         {
@@ -112,16 +164,13 @@ public class ArtworkService : IArtworkService
             return saved;
         }
 
-        // fallback to embedded image from first track
-        var firstTrack = album.Tracks.FirstOrDefault();
-        if (firstTrack != null)
+        // Finally accept an unnamed image only when there is no ambiguity.
+        var onlyImage = FindSingleImageInFolder(album.FolderPath);
+        if (onlyImage != null)
         {
-            var embedded = ExtractEmbeddedArtwork(firstTrack.FilePath, _artworkBaseDirectory);
-            if (embedded != null)
-            {
-                album.ArtworkPath = embedded;
-                return embedded;
-            }
+            var saved = SaveArtworkToAlbum(onlyImage, album);
+            album.ArtworkPath = saved;
+            return saved;
         }
 
         // default
@@ -139,7 +188,7 @@ public class ArtworkService : IArtworkService
             return track.ArtworkPath;
         }
 
-        var embedded = ExtractEmbeddedArtwork(track.FilePath, _artworkBaseDirectory);
+        var embedded = ExtractEmbeddedArtwork(track.FilePath!, _artworkBaseDirectory, $"track_{track.TrackId}");
         if (embedded != null)
         {
             track.ArtworkPath = embedded;
