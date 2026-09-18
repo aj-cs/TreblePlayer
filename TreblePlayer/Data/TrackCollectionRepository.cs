@@ -141,6 +141,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             var album = await _dbContext.Albums
+                .AsNoTracking()
                 .Include(a => a.Tracks)
                 .FirstOrDefaultAsync(a => a.Id == albumId);
 
@@ -163,6 +164,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             var playlist = await _dbContext.Playlists
+                .AsNoTracking()
                 .Include(p => p.Tracks)
                 .FirstOrDefaultAsync(p => p.Id == playlistId);
 
@@ -263,6 +265,7 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         try
         {
             var queue = await _dbContext.TrackQueues
+                .AsNoTracking()
                 .Include(q => q.Tracks)
                 .FirstOrDefaultAsync(q => q.Id == queueId);
 
@@ -545,6 +548,25 @@ public class TrackCollectionRepository : ITrackCollectionRepository
 
     }
 
+    public async Task<List<Album>> GetAllAlbumSummariesAsync()
+    {
+        try
+        {
+            var albums = await _dbContext.Albums
+                .AsNoTracking()
+                .Where(album => album.Tracks.Any())
+                .Include(album => album.Tracks)
+                .ToListAsync();
+            _logger.LogInformation($"Retrieved {albums.Count} album summaries");
+            return albums;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error getting album summaries", ex);
+            throw;
+        }
+    }
+
     // --- Implementation for Cleanup --- 
     public async Task CleanupEmptyCollectionsAsync()
     {
@@ -590,4 +612,3 @@ public class TrackCollectionRepository : ITrackCollectionRepository
         }
     }
 }
-

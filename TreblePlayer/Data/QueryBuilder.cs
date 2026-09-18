@@ -11,7 +11,6 @@ public static class QueryExtensions
     public static IOrderedQueryable<T> ApplySort<T>(
         this IQueryable<T> query, List<SortSpecification> specs,
         Dictionary<string, Expression<Func<T, object>>> customMappings = null)
-        where T : class, ITrackCollection
     {
         IOrderedQueryable<T> orderedQuery = null;
 
@@ -49,5 +48,40 @@ public static class QueryExtensions
         // return orderedQuery ?? query.OrderBy(x => x);
         return orderedQuery ?? query.OrderBy(x => 0); // above doesnt work cuz if T is an Album
         // then EF Core wont know how to translate ordering by a whole compelx object in sql and throw a runtime error
+    }
+
+    /// <summary>
+    /// Extension method to cleanly handle multi-tier sorting on collections already loaded into RAM
+    /// </summary>
+    public static IOrderedEnumerable<T> ApplyInMemorySort<T>(
+        this IEnumerable<T> collection,
+        List<SortSpecification> specs,
+        Dictionary<string, Func<T, object>> mappings)
+    {
+        IOrderedEnumerable<T> orderedResult = null;
+
+        foreach (var spec in specs)
+        {
+            // Fallback selector if the frontend sends an unmapped field name
+            if (!mappings.TryGetValue(spec.Field, out var selector))
+            {
+                continue;
+            }
+
+            if (orderedResult == null)
+            {
+                orderedResult = spec.Direction == SortDirection.Ascending
+                    ? collection.OrderBy(selector)
+                    : collection.OrderByDescending(selector);
+            }
+            else
+            {
+                orderedResult = spec.Direction == SortDirection.Ascending
+                    ? orderedResult.ThenBy(selector)
+                    : orderedResult.ThenByDescending(selector);
+            }
+        }
+
+        return orderedResult;
     }
 }

@@ -68,8 +68,14 @@ public class TrackRepository : ITrackRepository
         if (string.IsNullOrEmpty(filePath))
             return null;
 
+        // String.Equals(path, StringComparison.OrdinalIgnoreCase) cannot be
+        // translated by EF Core's SQLite provider. Keep the normalization on
+        // the parameter and use ToLower() on the column so the comparison is
+        // evaluated by SQLite instead of failing during a library scan.
+        var normalizedFilePath = filePath.ToLowerInvariant();
+
         return await _dbContext.Tracks
-            .FirstOrDefaultAsync(t => t.FilePath != null && t.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefaultAsync(t => t.FilePath != null && t.FilePath.ToLower() == normalizedFilePath);
     }
 
     public async Task<bool> AddOrUpdateTrackAsync(Track track)
@@ -99,8 +105,13 @@ public class TrackRepository : ITrackRepository
             if (existingTrack.Title != track.Title) { existingTrack.Title = track.Title; needsUpdate = true; }
             if (existingTrack.AlbumId != track.AlbumId) { existingTrack.AlbumId = track.AlbumId; needsUpdate = true; }
             if (existingTrack.Artist != track.Artist) { existingTrack.Artist = track.Artist; needsUpdate = true; }
+            if (existingTrack.AlbumTitle != track.AlbumTitle) { existingTrack.AlbumTitle = track.AlbumTitle; needsUpdate = true; }
+            if (existingTrack.Bitrate != track.Bitrate) { existingTrack.Bitrate = track.Bitrate; needsUpdate = true; }
+            if (existingTrack.Year != track.Year) { existingTrack.Year = track.Year; needsUpdate = true; }
+            if (existingTrack.Genre != track.Genre) { existingTrack.Genre = track.Genre; needsUpdate = true; }
             if (existingTrack.Duration != track.Duration) { existingTrack.Duration = track.Duration; needsUpdate = true; }
             if (existingTrack.TrackNumber != track.TrackNumber) { existingTrack.TrackNumber = track.TrackNumber; needsUpdate = true; }
+            if (existingTrack.DiscNumber != track.DiscNumber) { existingTrack.DiscNumber = track.DiscNumber; needsUpdate = true; }
             if (existingTrack.FilePath != track.FilePath) { existingTrack.FilePath = track.FilePath; needsUpdate = true; }
 
             if (needsUpdate)
@@ -148,6 +159,7 @@ public class TrackRepository : ITrackRepository
     public async Task<IEnumerable<Track>> GetAllTracksAsync()
     {
         var tracks = await _dbContext.Tracks
+            .AsNoTracking()
             .ToListAsync();
 
         if (!tracks.Any())

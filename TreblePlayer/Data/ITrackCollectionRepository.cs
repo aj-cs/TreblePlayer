@@ -13,6 +13,7 @@ public interface ITrackCollectionRepository
 
     Task<Album> GetAlbumByIdAsync(int albumId);
     Task<List<Album>> GetAllAlbumsAsync();
+    Task<List<Album>> GetAllAlbumSummariesAsync();
 
     Task<TrackQueue> GetQueueByIdAsync(int queueId);
     Task AddQueueAsync(TrackQueue newQueue);
@@ -41,4 +42,3 @@ public interface ITrackCollectionRepository
     // Add cleanup method signature
     Task CleanupEmptyCollectionsAsync();
 }
-
