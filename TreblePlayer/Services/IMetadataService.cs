@@ -19,6 +19,8 @@ public interface IMetadataService
     
     // Add the new method to normalize existing artist names
     Task NormalizeExistingArtistNames();
+    Task RefreshArtistMetadataAsync();
+    Task RefreshLibraryMetadataAsync(int? albumId = null);
 
     //Task<List<TrackMetadata>> GetTracksByArtistAsync(string folderPath, string artistName);
     //Task<List<string>> GetDistinctArtistsAsync(string folderPath);
