@@ -10,6 +10,12 @@ public class Album : ITrackCollection
     public int Size { get => Tracks?.Count ?? 0; }
 
     public string? AlbumArtist { get; set; }
+    /// <summary>
+    /// The artist credit read from the album metadata. AlbumArtist is the
+    /// canonical value used for grouping and sorting; this value is what the
+    /// library should display to the user.
+    /// </summary>
+    public string? OriginalArtist { get; set; }
     public string? ArtworkPath {get; set;}
 
     public string Genre { get; set; }

@@ -41,17 +41,55 @@ public class TrackQueue : ITrackCollection
         };
     }
 
-    public List<int> GetShuffledOrder()
+    /// <summary>
+    /// Returns the persisted queue order. The property is historically named
+    /// ShuffledTrackIds, but it now stores the logical order for both shuffled
+    /// and manually ordered queues.
+    /// </summary>
+    public List<int> GetPlaybackOrder()
     {
-        return string.IsNullOrWhiteSpace(ShuffledTrackIds)
-            ? Tracks.Select(t => t.TrackId).ToList()
-            : JsonSerializer.Deserialize<List<int>>(ShuffledTrackIds!) ?? new();
+        if (!string.IsNullOrWhiteSpace(ShuffledTrackIds))
+        {
+            try
+            {
+                var persistedOrder = JsonSerializer.Deserialize<List<int>>(ShuffledTrackIds!);
+                if (persistedOrder is not null && persistedOrder.Count > 0)
+                {
+                    var knownTrackIds = Tracks.Select(t => t.TrackId).ToHashSet();
+                    var orderedKnownIds = persistedOrder.Where(knownTrackIds.Contains).Distinct().ToList();
+                    var missingIds = Tracks
+                        .Where(t => !orderedKnownIds.Contains(t.TrackId))
+                        .OrderBy(t => t.DiscNumber)
+                        .ThenBy(t => t.TrackNumber)
+                        .ThenBy(t => t.TrackId)
+                        .Select(t => t.TrackId);
+
+                    return orderedKnownIds.Concat(missingIds).ToList();
+                }
+            }
+            catch (JsonException)
+            {
+                // Fall back to the deterministic metadata order below.
+            }
+        }
+
+        return Tracks
+            .OrderBy(t => t.DiscNumber)
+            .ThenBy(t => t.TrackNumber)
+            .ThenBy(t => t.TrackId)
+            .Select(t => t.TrackId)
+            .ToList();
     }
 
-    public void SetShuffledOrder(List<int> trackIds)
+    public void SetPlaybackOrder(IEnumerable<int> trackIds)
     {
-        ShuffledTrackIds = JsonSerializer.Serialize(trackIds);
+        ShuffledTrackIds = JsonSerializer.Serialize(trackIds.Distinct().ToList());
     }
+
+    // Kept as compatibility wrappers for existing callers.
+    public List<int> GetShuffledOrder() => GetPlaybackOrder();
+
+    public void SetShuffledOrder(List<int> trackIds) => SetPlaybackOrder(trackIds);
     public void AddTrack(Track track)
     {
         if (track == null)

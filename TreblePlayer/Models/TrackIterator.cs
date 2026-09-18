@@ -11,7 +11,7 @@ public class TrackIterator
     public TrackIterator(IEnumerable<Track> tracks, int startIndex, ILoggingService logger)
     {
         _tracks = tracks.ToList();
-        _currentIndex = Math.Clamp(startIndex, 0, _tracks.Count - 1);
+        _currentIndex = _tracks.Count == 0 ? 0 : Math.Clamp(startIndex, 0, _tracks.Count - 1);
         _logger = logger;
         _logger.LogDebug($"TrackIterator initialized with {_tracks.Count} tracks, starting at index {_currentIndex}");
     }

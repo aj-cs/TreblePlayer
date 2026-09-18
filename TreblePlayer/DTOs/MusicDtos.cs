@@ -11,7 +11,11 @@ public class AlbumDto
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Artist { get; set; } = string.Empty;
+    public string? OriginalArtist { get; set; }
+    public string ArtistSortKey { get; set; } = string.Empty;
     public string ArtworkUrl { get; set; } = string.Empty;
+    public int? Year { get; set; }
+    public DateTime LastModified { get; set; }
     public int TrackCount { get; set; }
     public List<TrackDto> Tracks { get; set; } = new List<TrackDto>();
 }
@@ -26,6 +30,14 @@ public class TrackDto
     public string AlbumTitle { get; set; } = string.Empty;
     public int Duration { get; set; }
     public string ArtworkUrl { get; set; } = string.Empty;
+}
+
+public class TrackPageDto
+{
+    public int Offset { get; set; }
+    public int Limit { get; set; }
+    public int TotalCount { get; set; }
+    public List<TrackDto> Tracks { get; set; } = new List<TrackDto>();
 }
 
 public class QueueDto
@@ -48,6 +60,16 @@ public class QueueMetadataDto
     public int? LastPlayedTrackId { get; set; }
 }
 
+public class PlaylistDto
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public int TrackCount { get; set; }
+    public int TotalDuration { get; set; }
+    public string ArtworkUrl { get; set; } = string.Empty;
+    public List<TrackDto> Tracks { get; set; } = new List<TrackDto>();
+}
+
 public class ArtistDto
 {
     public string Name { get; set; } = string.Empty;
@@ -55,4 +77,3 @@ public class ArtistDto
     public int TrackCount { get; set; }
     public List<AlbumDto> Albums { get; set; } = new List<AlbumDto>();
 }
-
