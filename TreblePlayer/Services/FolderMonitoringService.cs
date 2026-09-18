@@ -19,9 +19,11 @@ public class FolderMonitoringService : IHostedService, IDisposable
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly List<string> _monitoredFolders = new();
     private readonly List<FileSystemWatcher> _watchers = new();
+    private readonly object _watcherLock = new();
     private readonly ConcurrentQueue<string> _pendingChanges = new();
     private readonly SemaphoreSlim _processingLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
+    private Task? _startupScanTask;
 
     private const int DebounceMilliseconds = 1500; // 1.5 seconds
     private static readonly string[] SupportedExtensions = { ".mp3", ".flac", ".alac", ".opus", ".wav", ".aac", ".ogg" };
@@ -64,29 +66,32 @@ public class FolderMonitoringService : IHostedService, IDisposable
             }
         }
         
-        // Perform initial scan of all folders on startup
+        // Start the initial scan in the background so the HTTP API can become
+        // available immediately. The frontend can then show scan progress and
+        // refresh the library when the scan completes.
+        var foldersToScan = _monitoredFolders.ToList();
+        if (foldersToScan.Any())
+        {
+            _startupScanTask = Task.Run(() => RunInitialScanAsync(foldersToScan));
+        }
+
+        return;
+    }
+
+    private async Task RunInitialScanAsync(IReadOnlyCollection<string> foldersToScan)
+    {
         try
         {
             _logger.LogInformation("Performing initial scan of all monitored folders on startup");
-            
-            // Create a scope to resolve dependencies
             using var scope = _scopeFactory.CreateScope();
             var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
-            
-            // Create a copy of the list to avoid possible modification during iteration
-            var foldersToScan = _monitoredFolders.ToList();
-            
-            if (foldersToScan.Any())
-            {
-                _logger.LogInformation($"Starting initial scan of {foldersToScan.Count} folders");
-                await metadataService.ScanMusicFromDirectoryAsync(foldersToScan);
-                _logger.LogInformation("Initial folder scan completed successfully");
-            }
+            _logger.LogInformation($"Starting initial scan of {foldersToScan.Count} folders");
+            await metadataService.ScanMusicFromDirectoryAsync(foldersToScan.ToList());
+            _logger.LogInformation("Initial folder scan completed successfully");
         }
         catch (Exception ex)
         {
             _logger.LogError($"Error performing initial folder scan: {ex.Message}", ex);
-            // Continue with service startup despite scan errors
         }
     }
 
@@ -157,8 +162,53 @@ public class FolderMonitoringService : IHostedService, IDisposable
         watcher.Renamed += OnFileSystemRenamed;
         watcher.Error += OnWatcherError;
 
-        _watchers.Add(watcher);
+        lock (_watcherLock)
+        {
+            _watchers.Add(watcher);
+        }
         _logger.LogInformation($"Monitoring folder: {folderPath}");
+    }
+
+    public Task AddFolderAsync(string folderPath)
+    {
+        if (!Directory.Exists(folderPath))
+        {
+            throw new DirectoryNotFoundException(folderPath);
+        }
+
+        lock (_watcherLock)
+        {
+            if (_monitoredFolders.Any(path => string.Equals(path, folderPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                return Task.CompletedTask;
+            }
+
+            _monitoredFolders.Add(folderPath);
+            CreateAndStartWatcher(folderPath);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveFolderAsync(string folderPath)
+    {
+        lock (_watcherLock)
+        {
+            _monitoredFolders.RemoveAll(path => string.Equals(path, folderPath, StringComparison.OrdinalIgnoreCase));
+
+            var watchers = _watchers
+                .Where(watcher => string.Equals(watcher.Path, folderPath, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var watcher in watchers)
+            {
+                watcher.EnableRaisingEvents = false;
+                watcher.Dispose();
+                _watchers.Remove(watcher);
+            }
+        }
+
+        return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -205,7 +255,10 @@ public class FolderMonitoringService : IHostedService, IDisposable
 
                 watcher.EnableRaisingEvents = false;
                 watcher.Dispose();
-                _watchers.Remove(watcher);
+                lock (_watcherLock)
+                {
+                    _watchers.Remove(watcher);
+                }
 
                 CreateAndStartWatcher(path);
             }
