@@ -195,10 +195,10 @@ public class ArtworkController : ControllerBase
             byte[] fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
             string contentType = GetContentType(filePath);
 
-            // Add caching headers to prevent browser caching issues
-            Response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate");
-            Response.Headers.Add("Pragma", "no-cache");
-            Response.Headers.Add("Expires", "0");
+            // Artwork paths are stable for normal library use. Let the
+            // browser cache covers instead of re-reading every image during
+            // grid renders; library refreshes still reload the album data.
+            Response.Headers["Cache-Control"] = "public,max-age=86400";
 
             return File(fileBytes, contentType);
         }

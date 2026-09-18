@@ -21,19 +21,25 @@ namespace TreblePlayer.Controllers
         private readonly ILogger<SettingsController> _logger; // Use standard ILogger
         private readonly IMetadataService _metadataService; // <<< Add field
         private readonly OrphanedDataCleanupService _cleanupService; // Add this field
+        private readonly FolderMonitoringService _folderMonitoringService;
+        private readonly LibraryScanProgressService _scanProgress;
 
         public SettingsController(
             MusicPlayerDbContext context, 
             PlaybackWebSocketHandler webSocketHandler, 
             ILogger<SettingsController> logger,
             IMetadataService metadataService,
-            OrphanedDataCleanupService cleanupService) // Add parameter
+            OrphanedDataCleanupService cleanupService,
+            FolderMonitoringService folderMonitoringService,
+            LibraryScanProgressService scanProgress) // Add parameter
         {
             _context = context;
             _webSocketHandler = webSocketHandler;
             _logger = logger;
             _metadataService = metadataService;
             _cleanupService = cleanupService; // Assign field
+            _folderMonitoringService = folderMonitoringService;
+            _scanProgress = scanProgress;
         }
 
         // GET: api/settings/monitoredfolders
@@ -42,6 +48,12 @@ namespace TreblePlayer.Controllers
         {
             _logger.LogInformation("Getting monitored folders.");
             return await _context.MonitoredFolders.OrderBy(f => f.Path).ToListAsync();
+        }
+
+        [HttpGet("scan/status")]
+        public ActionResult<LibraryScanProgress> GetScanStatus()
+        {
+            return Ok(_scanProgress.Current);
         }
 
         // POST: api/settings/monitoredfolders
@@ -76,6 +88,8 @@ namespace TreblePlayer.Controllers
                 _context.MonitoredFolders.Add(newFolder);
                 await _context.SaveChangesAsync();
                 _logger.LogInformation($"Successfully added monitored folder: {normalizedPath} (ID: {newFolder.Id})");
+
+                await _folderMonitoringService.AddFolderAsync(normalizedPath);
 
                 // Notify frontend via WebSocket
                 _webSocketHandler.BroadcastNotification("MonitoredFoldersUpdated");
@@ -132,6 +146,8 @@ namespace TreblePlayer.Controllers
                 _context.MonitoredFolders.Remove(folderToRemove);
                 await _context.SaveChangesAsync();
                 _logger.LogInformation($"Successfully removed monitored folder: {folderPath} (ID: {id})");
+
+                await _folderMonitoringService.RemoveFolderAsync(folderPath);
 
                 // Notify frontend via WebSocket about the folder removal
                 _webSocketHandler.BroadcastNotification("MonitoredFoldersUpdated");
@@ -253,6 +269,58 @@ namespace TreblePlayer.Controllers
                 return StatusCode(500, "An unexpected error occurred during artist name normalization.");
             }
         }
+
+        [HttpPost("refresh-artist-metadata")]
+        public async Task<IActionResult> RefreshArtistMetadata()
+        {
+            _logger.LogInformation("API request received to refresh artist metadata from library files.");
+            try
+            {
+                await _metadataService.RefreshArtistMetadataAsync();
+                return Ok("Artist metadata refreshed successfully.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error refreshing artist metadata.");
+                return StatusCode(500, "An unexpected error occurred while refreshing artist metadata.");
+            }
+        }
+
+        [HttpPost("refresh-library-metadata")]
+        public async Task<IActionResult> RefreshLibraryMetadata()
+        {
+            _logger.LogInformation("API request received to refresh all library metadata from files.");
+            try
+            {
+                await _metadataService.RefreshLibraryMetadataAsync();
+                return Ok("Library metadata refreshed successfully.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error refreshing library metadata.");
+                return StatusCode(500, "An unexpected error occurred while refreshing library metadata.");
+            }
+        }
+
+        [HttpPost("refresh-album-metadata/{albumId:int}")]
+        public async Task<IActionResult> RefreshAlbumMetadata(int albumId)
+        {
+            _logger.LogInformation("API request received to refresh metadata for album {AlbumId}.", albumId);
+            try
+            {
+                await _metadataService.RefreshLibraryMetadataAsync(albumId);
+                return Ok("Album metadata refreshed successfully.");
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error refreshing metadata for album {AlbumId}.", albumId);
+                return StatusCode(500, "An unexpected error occurred while refreshing album metadata.");
+            }
+        }
     }
 
     // Simple DTO for adding a folder
@@ -268,4 +336,4 @@ namespace TreblePlayer.Controllers
         [Required]
         public string Path { get; set; } = string.Empty;
     }
-} 
+}

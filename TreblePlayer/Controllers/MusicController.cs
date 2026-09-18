@@ -4,6 +4,9 @@ using TreblePlayer.Data;
 using TreblePlayer.Models;
 using TreblePlayer.Services;
 using TreblePlayer.DTOs;
+using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
+using System.Xml.Serialization;
 
 namespace TreblePlayer.Controllers;
 
@@ -16,25 +19,33 @@ public class MusicController : ControllerBase
     private readonly ITrackCollectionRepository _collectionRepository;
     private readonly ILoggingService _logger;
     private readonly PlaybackWebSocketHandler _webSocketHandler;
+    private readonly IArtistNormalizationService? _normalizationService;
+    private readonly MusicPlayerDbContext? _dbContext;
 
     public MusicController(
         MusicPlayer musicPlayer,
         ITrackRepository trackRepository,
         ITrackCollectionRepository collectionRepository,
         ILoggingService logger,
-        PlaybackWebSocketHandler webSocketHandler)
+        PlaybackWebSocketHandler webSocketHandler,
+        IArtistNormalizationService? normalizationService = null,
+        MusicPlayerDbContext? dbContext = null
+        )
     {
         _player = musicPlayer;
         _trackRepository = trackRepository;
         _collectionRepository = collectionRepository;
         _logger = logger;
         _webSocketHandler = webSocketHandler;
+        _normalizationService = normalizationService;
+        _dbContext = dbContext;
     }
 
     [HttpPost("play/{trackId}")]
     public async Task<IActionResult> PlayAsync(int trackId)
     {
         await _player.PlayAsync(trackId);
+        _webSocketHandler.BroadcastNotification("QueuesUpdated");
         return Ok(new { message = $"Playing track (ID: {trackId})" });
     }
 
@@ -96,6 +107,7 @@ public class MusicController : ControllerBase
     public async Task<IActionResult> PlayCollection(int collectionId, TrackCollectionType type, int startIndex = 0)
     {
         await _player.PlayCollectionAsync(collectionId, type, startIndex);
+        _webSocketHandler.BroadcastNotification("QueuesUpdated");
         return Ok(new { message = $"Playing collection {collectionId} of type {type} at index {startIndex}" });
     }
 
@@ -103,17 +115,47 @@ public class MusicController : ControllerBase
     public IActionResult GetStatus()
     {
         var isPlaying = _player.IsPlaying();
-        return Ok(new { message = $"Music playing: {isPlaying}" });
+        return Ok(new { message = $"Music playing: {isPlaying}", volume = _player.Volume });
+    }
+
+    [HttpPost("volume/{volume:int}")]
+    public IActionResult SetVolume(int volume)
+    {
+        _player.SetVolume(volume);
+        return Ok(new { volume = _player.Volume });
     }
 
     [HttpGet("queues")]
     public async Task<IActionResult> GetAllQueues()
     {
-        var queues = await _collectionRepository.GetAllQueuesAsync();
-        Console.WriteLine($"GetAllQueues returned {queues.Count} queues.");
-        foreach (var q in queues) Console.WriteLine($"Queue: {q.Title}, TrackCount: {q.Tracks?.Count ?? 0}");
-
         var activeQueue = await _player.GetActiveQueueAsync();
+
+        if (_dbContext != null)
+        {
+            var queueRows = await _dbContext.TrackQueues
+                .AsNoTracking()
+                .Select(queue => new
+                {
+                    queue.Id,
+                    queue.Title,
+                    queue.LastPlayedTrackId,
+                    TrackCount = queue.Tracks.Count(),
+                    TotalDuration = queue.Tracks.Select(track => (int?)track.Duration).Sum() ?? 0
+                })
+                .ToListAsync();
+
+            return Ok(queueRows.Select(queue => new QueueMetadataDto
+            {
+                Id = queue.Id,
+                Title = queue.Title,
+                TrackCount = queue.TrackCount,
+                TotalDuration = queue.TotalDuration,
+                IsActive = activeQueue?.Id == queue.Id,
+                LastPlayedTrackId = queue.LastPlayedTrackId
+            }).ToList());
+        }
+
+        var queues = await _collectionRepository.GetAllQueuesAsync();
 
         var metadata = queues.Select(q => new QueueMetadataDto
         {
@@ -141,17 +183,7 @@ public class MusicController : ControllerBase
             CurrentTrackIndex = queue.CurrentTrackIndex ?? 0,
             LastPlaybackPositionSeconds = queue.LastPlaybackPositionSeconds,
             LastPlayedTrackId = queue.LastPlayedTrackId,
-            Tracks = queue.Tracks.Select(t => new TrackDto
-            {
-                Id = t.TrackId,
-                Number = t.TrackNumber,
-                Disc = t.DiscNumber,
-                Title = t.Title,
-                Artist = t.Artist,
-                AlbumTitle = t.AlbumTitle ?? string.Empty,
-                Duration = t.Duration,
-                ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/track/{t.TrackId}"
-            }).ToList()
+            Tracks = GetOrderedTracks(queue).Select(track => ToTrackDto(track)).ToList()
         };
         return Ok(queueDto);
     }
@@ -159,7 +191,7 @@ public class MusicController : ControllerBase
     [HttpPost("queue/switch/{queueId}")]
     public async Task<IActionResult> SwitchToQueue(int queueId)
     {
-        await _player.LoadQueueAndPlayAsync(queueId, 0);
+        await _player.LoadQueueAndPlayAsync(queueId);
         return Ok(new { message = $"Switched to queue {queueId}" });
     }
 
@@ -169,9 +201,7 @@ public class MusicController : ControllerBase
         var queue = await _player.GetActiveQueueAsync();
         if (queue == null) return NotFound(new { message = "No active queue found." });
 
-        var orderedTracks = queue.IsShuffleEnabled
-            ? queue.GetShuffledOrder().Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id)).Where(t => t != null).Cast<Track>().ToList()
-            : queue.Tracks.OrderBy(t => t.TrackNumber).ToList();
+        var orderedTracks = GetOrderedTracks(queue);
 
         var queueDto = new QueueDto
         {
@@ -179,17 +209,7 @@ public class MusicController : ControllerBase
             Title = queue.Title,
             CurrentTrackIndex = queue.CurrentTrackIndex ?? 0,
             LastPlaybackPositionSeconds = queue.LastPlaybackPositionSeconds,
-            Tracks = orderedTracks.Select(t => new TrackDto
-            {
-                Id = t.TrackId,
-                Number = t.TrackNumber,
-                Disc = t.DiscNumber,
-                Title = t.Title,
-                Artist = t.Artist,
-                AlbumTitle = t.AlbumTitle ?? string.Empty,
-                Duration = t.Duration,
-                ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/track/{t.TrackId}"
-            }).ToList()
+            Tracks = orderedTracks.Select(track => ToTrackDto(track)).ToList()
         };
         return Ok(queueDto);
     }
@@ -239,16 +259,16 @@ public class MusicController : ControllerBase
     }
 
     [HttpPost("shuffle/{enable}")]
-    public IActionResult EnableShuffle(bool enable)
+    public async Task<IActionResult> EnableShuffle(bool enable)
     {
-        _player.EnableShuffle(enable);
+        await _player.EnableShuffleAsync(enable);
         return Ok(new { message = $"Shuffle {(enable ? "enabled" : "disabled")}" });
     }
 
     [HttpPost("loop/{enable}")]
-    public IActionResult EnableLoop(bool enable)
+    public async Task<IActionResult> EnableLoop(bool enable)
     {
-        _player.EnableLoop(enable);
+        await _player.EnableLoopAsync(enable);
         return Ok(new { message = $"Loop {(enable ? "enabled" : "disabled")}" });
     }
 
@@ -270,7 +290,7 @@ public class MusicController : ControllerBase
     public async Task<IActionResult> GetAllPlaylists()
     {
         var playlists = await _collectionRepository.GetAllPlaylistsAsync();
-        return Ok(playlists);
+        return Ok(playlists.Select(ToPlaylistDto).ToList());
     }
 
     [HttpGet("playlist/{playlistId}")]
@@ -281,7 +301,7 @@ public class MusicController : ControllerBase
         {
             return NotFound(new { message = $"Playlist with ID {playlistId} not found." });
         }
-        return Ok(playlist);
+        return Ok(ToPlaylistDto(playlist));
     }
 
     [HttpPost("playlist/create")]
@@ -317,9 +337,10 @@ public class MusicController : ControllerBase
             }
         }
 
+        var createdPlaylist = await _collectionRepository.GetPlaylistByIdAsync(newPlaylist.Id);
         var responsePayload = new
         {
-            playlist = newPlaylist,
+            playlist = createdPlaylist == null ? null : ToPlaylistDto(createdPlaylist),
             trackAdditionErrors = trackAddErrors.Any() ? trackAddErrors : null
         };
 
@@ -381,63 +402,120 @@ public class MusicController : ControllerBase
             return Ok(new List<AlbumDto>());
         }
 
-        var albumsForFrontend = albumsFromRepo.Select(album => new AlbumDto
-        {
-            Id = album.Id,
-            Title = album.Title,
-            Artist = album.AlbumArtist ?? "Unknown Artist",
-            ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{album.Id}",
-            TrackCount = album.Tracks?.Count ?? 0,
-            Tracks = album.Tracks?.Select(t => new TrackDto
-            {
-                Id = t.TrackId,
-                Number = t.TrackNumber,
-                Disc = t.DiscNumber,
-                Title = t.Title,
-                Artist = t.Artist,
-                AlbumTitle = album.Title,
-                Duration = t.Duration,
-                ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{album.Id}"
-            }).OrderBy(t => t.Disc).ThenBy(t => t.Number).ToList() ?? new List<TrackDto>()
-        }).OrderBy(a => a.Artist).ThenBy(a => a.Title).ToList();
+        var albumsForFrontend = albumsFromRepo
+            .Where(album => album.Tracks != null && album.Tracks.Any())
+            .OrderBy(album => NormalizeArtistForSort(album.AlbumArtist))
+            .ThenBy(album => album.Title)
+            .Select(album => ToAlbumDto(album))
+            .ToList();
 
         return Ok(albumsForFrontend);
+    }
+
+    [HttpGet("album-summaries")]
+    public async Task<IActionResult> GetAlbumSummaries()
+    {
+        if (_dbContext == null)
+        {
+            var albums = await _collectionRepository.GetAllAlbumSummariesAsync();
+            return Ok(albums
+                .Where(album => album.Tracks != null && album.Tracks.Any())
+                .OrderBy(album => NormalizeArtistForSort(album.AlbumArtist))
+                .ThenBy(album => album.Title)
+                .Select(album => ToAlbumDto(album, includeTracks: false))
+                .ToList());
+        }
+
+        var albumRows = await _dbContext.Albums
+            .AsNoTracking()
+            .Where(album => album.Tracks.Any())
+            .Select(album => new
+            {
+                album.Id,
+                album.Title,
+                album.AlbumArtist,
+                album.Year,
+                album.LastModified,
+                OriginalArtist = album.OriginalArtist ?? album.Tracks
+                    .OrderBy(track => track.DiscNumber)
+                    .ThenBy(track => track.TrackNumber)
+                    .Select(track => track.Artist)
+                    .FirstOrDefault(),
+                TrackCount = album.Tracks.Count()
+            })
+            .ToListAsync();
+
+        var summaries = albumRows
+            .OrderBy(album => NormalizeArtistForSort(album.AlbumArtist))
+            .ThenBy(album => album.Title)
+            .Select(album => new AlbumDto
+            {
+                Id = album.Id,
+                Title = album.Title,
+                Artist = album.AlbumArtist ?? "Unknown Artist",
+                OriginalArtist = album.OriginalArtist,
+                ArtistSortKey = NormalizeArtistForSort(album.AlbumArtist),
+                ArtworkUrl = GetAlbumArtworkUrl(album.Id, album.LastModified),
+                Year = album.Year,
+                LastModified = album.LastModified,
+                TrackCount = album.TrackCount
+            })
+            .ToList();
+
+        return Ok(summaries);
+    }
+
+    [HttpGet("album/{albumId}")]
+    public async Task<IActionResult> GetAlbumById(int albumId)
+    {
+        var album = await _collectionRepository.GetAlbumByIdAsync(albumId);
+        return album == null
+            ? NotFound(new { message = $"Album with ID {albumId} not found." })
+            : Ok(ToAlbumDto(album));
     }
 
     [HttpGet("artists")]
     public async Task<IActionResult> GetAllArtists()
     {
-        var albumsFromRepo = await _collectionRepository.GetAllAlbumsAsync();
-        if (albumsFromRepo == null)
+        if (_dbContext == null)
         {
             return Ok(new List<ArtistDto>());
         }
 
-        var artists = albumsFromRepo
-            .GroupBy(a => a.AlbumArtist ?? "Unknown Artist")
+        // The artist page only needs album/track counts and album summaries.
+        // Avoid loading every Track entity and serializing every track into
+        // every artist response just to render the grid.
+        var albumRows = await _dbContext.Albums
+            .AsNoTracking()
+            .Where(album => album.Tracks.Any())
+            .Select(album => new
+            {
+                album.Id,
+                album.Title,
+                album.AlbumArtist,
+                album.Year,
+                album.LastModified,
+                TrackCount = album.Tracks.Count()
+            })
+            .ToListAsync();
+
+        var artists = albumRows
+            .GroupBy(album => NormalizeArtistForSort(album.AlbumArtist))
             .Select(g => new ArtistDto
             {
                 Name = g.Key,
                 AlbumCount = g.Count(),
-                TrackCount = g.Sum(a => a.Tracks?.Count ?? 0),
+                TrackCount = g.Sum(album => album.TrackCount),
                 Albums = g.Select(album => new AlbumDto
                 {
                     Id = album.Id,
                     Title = album.Title,
                     Artist = album.AlbumArtist ?? "Unknown Artist",
-                    ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{album.Id}",
-                    TrackCount = album.Tracks?.Count ?? 0,
-                    Tracks = album.Tracks?.Select(t => new TrackDto
-                    {
-                        Id = t.TrackId,
-                        Number = t.TrackNumber,
-                        Disc = t.DiscNumber,
-                        Title = t.Title,
-                        Artist = t.Artist,
-                        AlbumTitle = album.Title,
-                        Duration = t.Duration,
-                        ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{album.Id}"
-                    }).OrderBy(t => t.Disc).ThenBy(t => t.Number).ToList() ?? new List<TrackDto>()
+                    ArtistSortKey = NormalizeArtistForSort(album.AlbumArtist),
+                    ArtworkUrl = GetAlbumArtworkUrl(album.Id, album.LastModified),
+                    Year = album.Year,
+                    LastModified = album.LastModified,
+                    TrackCount = album.TrackCount
                 }).OrderBy(a => a.Title).ToList()
             })
             .OrderBy(a => a.Name)
@@ -445,29 +523,235 @@ public class MusicController : ControllerBase
 
         return Ok(artists);
     }
-    [HttpPost("tracks/sorted")]
-    public async Task<IActionResult> GetSortedTracksWithSpecification([FromBody] List<SortSpecification> specs)
+
+    [HttpGet("artist-names")]
+    public async Task<IActionResult> GetArtistNames()
     {
+        var albums = await _collectionRepository.GetAllAlbumsAsync();
+        if (albums == null) return Ok(Array.Empty<string>());
+
+        var names = albums
+            .SelectMany(album => new[] { album.AlbumArtist ?? string.Empty }
+                .Concat(album.Tracks?.Select(track => track.Artist) ?? Enumerable.Empty<string>()))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(name => name)
+            .ToList();
+
+        return Ok(names);
+    }
+
+    [HttpPost("sorted/albums")]
+    public async Task<IActionResult> GetSortedAlbumsWithSpecifications(
+            [FromBody] List<SortSpecification> specs,
+            [FromServices] IArtistNormalizationService normalizationService)
+    {
+        // fallback
         if (specs == null || specs.Count == 0)
         {
             specs = new List<SortSpecification> {
-                new SortSpecification { Field = "artist", Direction = SortDirection.Ascending}
+                new SortSpecification {Field = "ArtistAlias", Direction = SortDirection.Ascending}
             };
         }
 
-        var tracks = await _trackRepository.GetAllTracksAsync();
-        var query = tracks.AsQueryable();
+        // fetch raw albums into memory
+        var albums = await _collectionRepository.GetAllAlbumsAsync();
+        if (albums == null) return Ok(new List<AlbumDto>());
 
-        var sortedQuery = QueryBuilder.ApplySort
+        albums = albums
+            .Where(album => album.Tracks != null && album.Tracks.Any())
+            .ToList();
+
+        // function selectors
+        var mappings = new Dictionary<string, Func<Album, object>>(StringComparer.OrdinalIgnoreCase){
+            {"ArtistAlias", a => normalizationService.NormalizeArtistName(a.AlbumArtist ?? string.Empty, out _, out _, out _)},
+            {"ArtistRaw", a => a.AlbumArtist ?? string.Empty},
+            {"ReleaseYear", a => a.Year ?? 0},
+            {"Year", a => a.Year ?? 0},
+            {"DateUpdated", a => a.LastModified},
+            {"Random", a => Random.Shared.Next()},
+            {"Title", a => a.Title ?? string.Empty}
+        };
+
+        IOrderedEnumerable<Album>? orderedResult = null;
+
+        foreach (var spec in specs)
+        {
+            if (!mappings.TryGetValue(spec.Field, out var selector))
+            {
+                selector = a => a.Title ?? string.Empty;
+            }
+
+            if (orderedResult == null)
+            {
+                orderedResult = spec.Direction == SortDirection.Ascending
+                    ? albums.OrderBy(selector)
+                    : albums.OrderByDescending(selector);
+            }
+            else
+            {
+                orderedResult = spec.Direction == SortDirection.Ascending
+                    ? orderedResult.ThenBy(selector)
+                    : orderedResult.ThenByDescending(selector);
+            }
+        }
+
+        var finalResult = orderedResult?.ToList() ?? albums.OrderBy(a => a.Title).ToList();
+        return Ok(finalResult.Select(album => ToAlbumDto(album)).ToList());
     }
-
-
-
 
     [HttpGet("tracks")]
     public async Task<IActionResult> GetAllTracks()
     {
         var tracks = await _trackRepository.GetAllTracksAsync();
-        return Ok(tracks ?? new List<Track>());
+        return Ok((tracks ?? Enumerable.Empty<Track>()).Select(track => ToTrackDto(track)).ToList());
+    }
+
+    [HttpGet("tracks/page")]
+    public async Task<IActionResult> GetTracksPage([FromQuery] int offset = 0, [FromQuery] int limit = 200)
+    {
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit, 25, 500);
+
+        if (_dbContext == null)
+        {
+            var allTracks = (await _trackRepository.GetAllTracksAsync())
+                .OrderBy(track => track.TrackId)
+                .ToList();
+
+            return Ok(new TrackPageDto
+            {
+                Offset = offset,
+                Limit = limit,
+                TotalCount = allTracks.Count,
+                Tracks = allTracks
+                    .Skip(offset)
+                    .Take(limit)
+                    .Select(track => ToTrackDto(track))
+                    .ToList()
+            });
+        }
+
+        var totalCount = await _dbContext.Tracks.CountAsync();
+        var pageRows = await _dbContext.Tracks
+            .AsNoTracking()
+            .OrderBy(track => track.TrackId)
+            .Skip(offset)
+            .Take(limit)
+            .Select(track => new
+            {
+                track.TrackId,
+                track.TrackNumber,
+                track.DiscNumber,
+                track.Title,
+                track.Artist,
+                track.AlbumTitle,
+                track.Duration
+            })
+            .ToListAsync();
+
+        return Ok(new TrackPageDto
+        {
+            Offset = offset,
+            Limit = limit,
+            TotalCount = totalCount,
+            Tracks = pageRows.Select(track => new TrackDto
+            {
+                Id = track.TrackId,
+                Number = track.TrackNumber,
+                Disc = track.DiscNumber,
+                Title = track.Title,
+                Artist = track.Artist,
+                AlbumTitle = track.AlbumTitle ?? string.Empty,
+                Duration = track.Duration,
+                ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/track/{track.TrackId}"
+            }).ToList()
+        });
+    }
+
+    private List<Track> GetOrderedTracks(TrackQueue queue)
+    {
+        var trackMap = queue.Tracks.ToDictionary(t => t.TrackId);
+        return queue.GetPlaybackOrder()
+            .Where(trackMap.ContainsKey)
+            .Select(id => trackMap[id])
+            .ToList();
+    }
+
+    private TrackDto ToTrackDto(Track track, string? artworkUrl = null)
+    {
+        return new TrackDto
+        {
+            Id = track.TrackId,
+            Number = track.TrackNumber,
+            Disc = track.DiscNumber,
+            Title = track.Title,
+            Artist = track.Artist,
+            AlbumTitle = track.AlbumTitle ?? string.Empty,
+            Duration = track.Duration,
+            ArtworkUrl = artworkUrl ?? $"{Request.Scheme}://{Request.Host}/api/Artwork/track/{track.TrackId}"
+        };
+    }
+
+    private AlbumDto ToAlbumDto(Album album, bool includeTracks = true)
+    {
+        var artworkUrl = GetAlbumArtworkUrl(album.Id, album.LastModified);
+        var originalArtist = album.OriginalArtist ?? album.Tracks?
+            .OrderBy(track => track.DiscNumber)
+            .ThenBy(track => track.TrackNumber)
+            .Select(track => track.Artist)
+            .FirstOrDefault(artist => !string.IsNullOrWhiteSpace(artist));
+
+        return new AlbumDto
+        {
+            Id = album.Id,
+            Title = album.Title,
+            Artist = album.AlbumArtist ?? "Unknown Artist",
+            OriginalArtist = originalArtist,
+            ArtistSortKey = NormalizeArtistForSort(album.AlbumArtist),
+            ArtworkUrl = artworkUrl,
+            Year = album.Year,
+            LastModified = album.LastModified,
+            TrackCount = album.Tracks?.Count ?? 0,
+            Tracks = includeTracks
+                ? album.Tracks?
+                    .OrderBy(t => t.DiscNumber)
+                    .ThenBy(t => t.TrackNumber)
+                    .Select(t => ToTrackDto(t, artworkUrl))
+                    .ToList() ?? new List<TrackDto>()
+                : new List<TrackDto>()
+        };
+    }
+
+    private string GetAlbumArtworkUrl(int albumId, DateTime lastModified)
+    {
+        return $"{Request.Scheme}://{Request.Host}/api/Artwork/album/{albumId}?v={lastModified.Ticks}";
+    }
+
+    private string NormalizeArtistForSort(string? artist)
+    {
+        if (_normalizationService == null)
+            return artist ?? "Unknown Artist";
+
+        return _normalizationService.NormalizeArtistName(
+            artist ?? string.Empty,
+            out _,
+            out _,
+            out _);
+    }
+
+    private PlaylistDto ToPlaylistDto(Playlist playlist)
+    {
+        return new PlaylistDto
+        {
+            Id = playlist.Id,
+            Title = playlist.Title,
+            TrackCount = playlist.Tracks?.Count ?? 0,
+            TotalDuration = playlist.Tracks?.Sum(t => t.Duration) ?? 0,
+            ArtworkUrl = $"{Request.Scheme}://{Request.Host}/api/Artwork/playlist/{playlist.Id}",
+            Tracks = playlist.Tracks?.Select(track => ToTrackDto(track)).ToList() ?? new List<TrackDto>()
+        };
     }
 }
