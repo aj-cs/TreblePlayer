@@ -9,7 +9,12 @@ public class PlaybackWebSocketHandler
 {
     private readonly MusicPlayer _player;
     private readonly ConcurrentDictionary<string, WebSocket> _sockets = new();
+    private readonly SemaphoreSlim _broadcastLock = new(1, 1);
     private readonly ILogger<PlaybackWebSocketHandler> _logger;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public PlaybackWebSocketHandler(MusicPlayer player, ILogger<PlaybackWebSocketHandler> logger)
     {
@@ -57,26 +62,37 @@ public class PlaybackWebSocketHandler
 
     private void Broadcast(object message)
     {
-        var json = JsonSerializer.Serialize(message);
+        var json = JsonSerializer.Serialize(message, JsonOptions);
         var bytes = Encoding.UTF8.GetBytes(json);
-        var arraySegment = new ArraySegment<byte>(bytes);
+        _ = BroadcastAsync(bytes);
+    }
 
-        foreach (var socket in _sockets.Values)
+    private async Task BroadcastAsync(byte[] bytes)
+    {
+        await _broadcastLock.WaitAsync();
+        try
         {
-            if (socket.State == WebSocketState.Open)
+            foreach (var socket in _sockets.Values)
             {
-                Task.Run(async () =>
+                if (socket.State != WebSocketState.Open) continue;
+
+                try
                 {
-                    try
-                    {
-                        await socket.SendAsync(arraySegment, WebSocketMessageType.Text, true, CancellationToken.None);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning($"Failed to send WebSocket message: {ex.Message}");
-                    }
-                });
+                    await socket.SendAsync(
+                        new ArraySegment<byte>(bytes),
+                        WebSocketMessageType.Text,
+                        true,
+                        CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to send WebSocket message: {ex.Message}");
+                }
             }
+        }
+        finally
+        {
+            _broadcastLock.Release();
         }
     }
 

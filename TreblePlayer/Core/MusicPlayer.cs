@@ -16,7 +16,9 @@ public class MusicPlayer : IDisposable
     private TrackIterator? _iterator;
 
     private readonly object _locker = new();
+    private readonly SemaphoreSlim _stateSaveLock = new(1, 1);
     private bool _isPlaying;
+    private int _volume = 70;
     public bool ShuffleEnabled { get; set; }
     public bool AutoAdvanceEnabled { get; set; } = true;
 
@@ -60,6 +62,7 @@ public class MusicPlayer : IDisposable
             _logger.LogInformation($"MusicPlayer: Preparing to play track (ID: {track.TrackId})");
             _currentMedia = new Media(_libVlc, new Uri(track.FilePath));
             _player = new MediaPlayer(_currentMedia);
+            _player.Volume = _volume;
 
             if (AutoAdvanceEnabled)
             {
@@ -78,6 +81,7 @@ public class MusicPlayer : IDisposable
 
         _logger.LogInformation($"Broadcasting PlaybackStarted for track {track.TrackId}");
         PlaybackStarted?.Invoke(track.TrackId);
+        _ = SaveActiveQueueStateAsync();
         _logger.LogInformation($"Playing: {track.Title}, ID: {track.TrackId}");
     }
 
@@ -142,23 +146,26 @@ public class MusicPlayer : IDisposable
 
     public bool Pause()
     {
+        bool paused;
         lock (_locker)
         {
             if (_player == null || !_player.IsPlaying) return false;
             _player.Pause();
             _isPlaying = false;
-            _ = SaveActiveQueueStateAsync();
-            PlaybackPaused?.Invoke();
-            return true;
+            paused = true;
         }
+
+        _ = SaveActiveQueueStateAsync();
+        if (paused) PlaybackPaused?.Invoke();
+        return paused;
     }
 
     public bool Stop()
     {
+        bool stopped;
         lock (_locker)
         {
             if (_player == null) return false;
-            _ = SaveActiveQueueStateAsync();
             try
             {
                 _player.Stop();
@@ -169,9 +176,12 @@ public class MusicPlayer : IDisposable
             _isPlaying = false;
             _player = null;
             _currentMedia = null;
-            PlaybackStopped?.Invoke();
-            return true;
+            stopped = true;
         }
+
+        _ = SaveActiveQueueStateAsync();
+        if (stopped) PlaybackStopped?.Invoke();
+        return stopped;
     }
 
     public bool Resume()
@@ -199,6 +209,18 @@ public class MusicPlayer : IDisposable
     }
 
     public bool IsPlaying() => _isPlaying && _player?.IsPlaying == true;
+
+    public int Volume => _volume;
+
+    public void SetVolume(int volume)
+    {
+        var normalizedVolume = Math.Clamp(volume, 0, 100);
+        lock (_locker)
+        {
+            _volume = normalizedVolume;
+            if (_player != null) _player.Volume = normalizedVolume;
+        }
+    }
 
     public float? CurrentPositionSeconds => _player?.Time / 1000f;
 
@@ -261,24 +283,27 @@ public class MusicPlayer : IDisposable
             var queue = await repo.GetQueueByIdAsync(queueId);
             if (queue == null) throw new Exception("Queue not found");
 
-            // Create a map of tracks by ID for efficiency
             var trackMap = queue.Tracks.ToDictionary(t => t.TrackId);
-            
-            // Clear existing tracks and re-add in the new order
-            queue.Tracks.Clear();
-            foreach (var id in trackIds)
+
+            var requestedIds = trackIds.Distinct().ToList();
+            if (requestedIds.Count != trackMap.Count || requestedIds.Any(id => !trackMap.ContainsKey(id)))
             {
-                if (trackMap.TryGetValue(id, out var track))
-                {
-                    queue.Tracks.Add(track);
-                }
+                throw new ArgumentException("The reordered queue must contain each existing track exactly once.");
             }
 
-            // If this is the session queue, update the iterator
+            queue.SetPlaybackOrder(requestedIds);
+            queue.IsManuallyModified = true;
+
             if (queue.IsSessionQueue && _iterator != null)
             {
-                // Note: This is a simplistic update. We might need to keep track of current track more carefully
-                _iterator = new TrackIterator(queue.Tracks.ToList(), _iterator.CurrentIndex, _logger);
+                var currentTrackId = _iterator.Current?.TrackId;
+                var orderedTracks = requestedIds.Select(id => trackMap[id]).ToList();
+                var newIndex = currentTrackId.HasValue
+                    ? Math.Max(0, orderedTracks.FindIndex(t => t.TrackId == currentTrackId.Value))
+                    : 0;
+
+                _iterator = new TrackIterator(orderedTracks, newIndex, _logger);
+                queue.CurrentTrackIndex = newIndex;
             }
 
             await repo.SaveAsync(queue);
@@ -294,11 +319,12 @@ public class MusicPlayer : IDisposable
 
         if (track == null || queue == null) throw new ArgumentException("Track or Queue not found");
         queue.AddTrack(track);
+        queue.SetPlaybackOrder(queue.GetPlaybackOrder().Append(trackId));
         queue.IsManuallyModified = true;
         await repo.SaveAsync(queue);
     }
 
-    public async Task LoadQueueAndPlayAsync(int queueId, int startIndex = 0)
+    public async Task LoadQueueAndPlayAsync(int queueId, int? startIndex = null)
     {
         await ExecuteInScopeAsync(async repo =>
         {
@@ -308,37 +334,50 @@ public class MusicPlayer : IDisposable
             var queue = await repo.GetQueueByIdAsync(queueId);
             if (queue == null || !queue.Tracks.Any()) return;
 
-            var orderedTracks = queue.IsShuffleEnabled
-                ? queue.GetShuffledOrder().Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id)).Where(t => t != null).Cast<Track>().ToList()
-                : queue.Tracks.OrderBy(t => t.TrackNumber).ToList();
+            var trackMap = queue.Tracks.ToDictionary(t => t.TrackId);
+            var orderedTracks = queue.GetPlaybackOrder()
+                .Where(trackMap.ContainsKey)
+                .Select(id => trackMap[id])
+                .ToList();
 
             if (!orderedTracks.Any()) orderedTracks = queue.Tracks.OrderBy(t => t.TrackNumber).ToList();
 
-            int effectiveIndex = startIndex; // Always respect the passed startIndex
+            var previousIndex = queue.CurrentTrackIndex;
+            var previousTrackId = queue.LastPlayedTrackId;
+            var previousPosition = queue.LastPlaybackPositionSeconds;
+            int effectiveIndex = Math.Clamp(startIndex ?? queue.CurrentTrackIndex ?? 0, 0, orderedTracks.Count - 1);
             _iterator = new TrackIterator(orderedTracks, effectiveIndex, _logger);
             queue.IsSessionQueue = true;
             queue.CurrentTrackIndex = effectiveIndex;
             await repo.SaveAsync(queue);
 
-            // Only resume playback position if we are resuming the same track index we left off at
-            float? resumePosition = (effectiveIndex == queue.CurrentTrackIndex) ? queue.LastPlaybackPositionSeconds : 0;
+            var isSameSavedTrack = previousIndex == effectiveIndex && previousTrackId == _iterator.Current?.TrackId;
+            float? resumePosition = isSameSavedTrack ? previousPosition : null;
             await InternalPlayAsync(_iterator.Current, resumePosition);
         });
     }
 
     public async Task SaveActiveQueueStateAsync()
     {
-        await ExecuteInScopeAsync(async repo =>
+        await _stateSaveLock.WaitAsync();
+        try
         {
-            var sessionQueue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
-            if (sessionQueue != null && _iterator != null)
+            await ExecuteInScopeAsync(async repo =>
             {
-                sessionQueue.CurrentTrackIndex = _iterator.CurrentIndex;
-                sessionQueue.LastPlaybackPositionSeconds = CurrentPositionSeconds;
-                sessionQueue.LastPlayedTrackId = _iterator.Current?.TrackId;
-                await repo.SaveAsync(sessionQueue);
-            }
-        });
+                var sessionQueue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
+                if (sessionQueue != null && _iterator != null)
+                {
+                    sessionQueue.CurrentTrackIndex = _iterator.CurrentIndex;
+                    sessionQueue.LastPlaybackPositionSeconds = CurrentPositionSeconds;
+                    sessionQueue.LastPlayedTrackId = _iterator.Current?.TrackId;
+                    await repo.SaveAsync(sessionQueue);
+                }
+            });
+        }
+        finally
+        {
+            _stateSaveLock.Release();
+        }
     }
 
     public async Task<int> CreateNowPlayingQueueAsync(List<Track> tracks, string title, int? collectionId = null, TrackCollectionType? collectionType = null)
@@ -351,6 +390,7 @@ public class MusicPlayer : IDisposable
             {
                 Title = title,
                 IsSessionQueue = true,
+                IsShuffleEnabled = ShuffleEnabled,
                 Tracks = tracks,
                 CurrentTrackIndex = 0,
                 DateCreated = DateTime.UtcNow,
@@ -367,43 +407,43 @@ public class MusicPlayer : IDisposable
         });
     }
 
-    public void EnableShuffle(bool enable = true)
+    public async Task EnableShuffleAsync(bool enable = true)
     {
         ShuffleEnabled = enable;
-        _ = Task.Run(async () =>
+        await ExecuteInScopeAsync(async repo =>
         {
-            await ExecuteInScopeAsync(async repo =>
+            var queue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
+            if (queue == null) return;
+
+            queue.IsShuffleEnabled = enable;
+            var ids = enable
+                ? queue.Tracks.OrderBy(_ => Guid.NewGuid()).Select(t => t.TrackId).ToList()
+                : queue.Tracks.OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).Select(t => t.TrackId).ToList();
+            queue.SetPlaybackOrder(ids);
+            await repo.SaveAsync(queue);
+
+            if (_iterator != null)
             {
-                var queue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
-                if (queue == null) return;
-
-                queue.IsShuffleEnabled = enable;
-                var ids = enable ? queue.Tracks.OrderBy(_ => Guid.NewGuid()).Select(t => t.TrackId).ToList() : queue.Tracks.OrderBy(t => t.TrackNumber).Select(t => t.TrackId).ToList();
-                queue.SetShuffledOrder(ids);
+                var currentTrackId = _iterator.Current?.TrackId;
+                var tracks = ids.Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id)).Where(t => t != null).Cast<Track>().ToList();
+                var currentIndex = currentTrackId.HasValue ? Math.Max(0, tracks.FindIndex(t => t.TrackId == currentTrackId.Value)) : 0;
+                _iterator = new TrackIterator(tracks, currentIndex, _logger);
+                queue.CurrentTrackIndex = currentIndex;
                 await repo.SaveAsync(queue);
-
-                if (_iterator != null && queue.IsSessionQueue)
-                {
-                    var tracks = ids.Select(id => queue.Tracks.FirstOrDefault(t => t.TrackId == id)).Where(t => t != null).Cast<Track>().ToList();
-                    _iterator = new TrackIterator(tracks, 0, _logger);
-                }
-            });
+            }
         });
     }
 
-    public void EnableLoop(bool enable = true)
+    public async Task EnableLoopAsync(bool enable = true)
     {
-        _ = Task.Run(async () =>
+        await ExecuteInScopeAsync(async repo =>
         {
-            await ExecuteInScopeAsync(async repo =>
+            var queue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
+            if (queue != null)
             {
-                var queue = (await repo.GetAllQueuesAsync()).FirstOrDefault(q => q.IsSessionQueue);
-                if (queue != null)
-                {
-                    queue.IsLoopEnabled = enable;
-                    await repo.SaveAsync(queue);
-                }
-            });
+                queue.IsLoopEnabled = enable;
+                await repo.SaveAsync(queue);
+            }
         });
     }
 
@@ -450,7 +490,8 @@ public class MusicPlayer : IDisposable
                 {
                     // For now, avoid re-assigning tracks to prevent tracking conflicts
                     // The existing tracks should be sufficient for re-playback
-                    queue.SetShuffledOrder(tracks.Select(t => t.TrackId).ToList());
+                    queue.IsShuffleEnabled = ShuffleEnabled;
+                    queue.SetPlaybackOrder(tracks.Select(t => t.TrackId).ToList());
                     await repo.SaveAsync(queue);
                 }
             });
